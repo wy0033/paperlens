@@ -697,9 +697,27 @@
     });
   }
 
+  // 本地导入题录：无论当前数据源是什么，导入的题录始终参与检索
+  function localImportedSearch(keywords, f) {
+    if (!IMPORTED.length) return Promise.resolve([]);
+    let items = IMPORTED.filter(p => matchFilters(p, f)).map(p => Object.assign({}, p, { _score: relevance(p, keywords) }));
+    if (keywords) items = items.filter(p => p._score > 0);
+    items.sort((a, b) => b._score - a._score || b.downloads - a.downloads);
+    return Promise.resolve(items);
+  }
+
+  function withImported(remotePromise, keywords, f) {
+    return Promise.all([remotePromise, localImportedSearch(keywords, f)]).then(([remote, local]) => {
+      if (!local.length) return remote;
+      const items = dedupePapers(remote.items.concat(local));
+      const note = (remote.note || '') + ' · 另含 ' + local.length + ' 篇本地导入题录（知网 / PubScholar / 万方 / PDF）';
+      return { items, note };
+    });
+  }
+
   function search(keywords, f, cfg) {
-    if (cfg.source === 'openalex') return openAlexSearch(keywords, f, cfg);
-    if (cfg.source === 'custom') return customSearch(keywords, f, cfg);
+    if (cfg.source === 'openalex') return withImported(openAlexSearch(keywords, f, cfg), keywords, f);
+    if (cfg.source === 'custom') return withImported(customSearch(keywords, f, cfg), keywords, f);
     return demoSearch(keywords, f);
   }
 
