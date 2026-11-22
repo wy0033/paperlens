@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>研途 · 面向科研新手的检索与审查工作台</title>
+<meta name="theme-color" content="#2154d8">
+<meta name="description" content="研途——面向科研新手的检索与审查工作台：先找到论文，再决定要不要让 AI 读。">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icons/favicon.png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/styles.css">
+<script>try{if(localStorage.getItem('paperlens.theme.v1')==='dark')document.documentElement.setAttribute('data-theme','dark')}catch(e){}</script>
+</head>
+<body>
+<a class="skip-link" href="#mainContent">跳转到主要内容</a>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <a class="brand" href="#" id="brandHome">
+      <span class="brand-mark">PL</span>
+      <span class="brand-text"><b>研途</b><small>科研入门助手</small></span>
+    </a>
+    <div class="topbar-right">
+      <span class="mode-badge" id="modeBadge" title="当前检索数据源">演示数据集</span>
+      <button class="btn btn-outline btn-sm" id="importBtn" title="导入知网 / PubScholar / 万方导出的题录">导入题录</button>
+      <button class="btn btn-ghost btn-sm" id="settingsBtn">接入设置</button>
+      <button class="btn btn-ghost btn-sm" id="helpBtn">使用说明</button>
+      <button class="btn btn-ghost btn-sm theme-btn" id="themeBtn" title="切换夜间模式" aria-label="切换夜间模式">🌙</button>
+      <span class="user-chip" id="userChip" hidden><span class="user-avatar" id="userAvatar">客</span><span class="user-name" id="userName">访客</span></span>
+      <button class="btn btn-ghost btn-sm" id="logoutBtn" hidden>退出</button>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-eyebrow">ZJUT HACK 2026 · 赛道三参赛作品原型</div>
+    <h1>先找到论文，<em>再决定要不要让 AI 读</em></h1>
+    <p class="hero-sub">面向刚接触科研的同学，把找论文、读懂术语、比较研究和核验结论串成一条可控的学习路径。先用一句话或多条件找到文献，再由你选择任务，AI 才基于已选题录介入。</p>
+    <div class="value-strip" aria-label="研途核心工作流">
+      <span><b>找得到</b> 学校、层次、年份与主题筛选</span>
+      <span><b>读得懂</b> 摘要、术语解释与中译</span>
+      <span><b>辨得清</b> 多篇对比、创新线索与五步核查</span>
+      <span><b>学得会</b> 生成先修知识与阅读路径</span>
+    </div>
+
+    <div class="searchbox">
+      <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 21l-4.35-4.35M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"/></svg>
+      <label class="sr-only" for="searchInput">检索论文</label>
+      <input id="searchInput" type="search" autocomplete="off" placeholder="试试：浙江大学 博士论文 下载量>1000 近五年 联邦学习">
+      <button class="btn btn-primary" id="searchBtn">检索文献</button>
+    </div>
+    <div class="examples" id="examples">
+      <span class="examples-label">示例检索式</span>
+      <button class="chip" data-q="联邦学习 隐私保护">联邦学习 隐私保护</button>
+      <button class="chip" data-q="浙江大学 博士论文 下载量>1000">浙江大学 博士论文 下载量&gt;1000</button>
+      <button class="chip" data-q="近三年 SCI 下载超过5000 大模型">近三年 SCI 下载超过5000 大模型</button>
+      <button class="chip" data-q="英文论文 引用>100 检索增强生成">英文论文 引用&gt;100 检索增强生成</button>
+      <button class="chip" data-q="浙江工业大学 教育技术 核心期刊">浙江工业大学 教育技术 核心期刊</button>
+      <button class="chip" data-q="开放获取 OA 英文论文 引用>100">开放获取 OA 英文论文 引用&gt;100</button>
+    </div>
+
+    <div class="search-library">
+      <div class="search-library-actions">
+        <button class="link-btn" id="queryToolsToggle" aria-expanded="false" aria-controls="queryToolsPanel">历史、已保存与最近阅读</button>
+        <button class="link-btn" id="saveFiltersBtn">保存当前条件</button>
+      </div>
+      <div class="search-library-panel" id="queryToolsPanel" hidden>
+        <section><h3>检索历史</h3><div id="queryHistoryList" class="library-list"></div></section>
+        <section><h3>已保存的筛选</h3><div id="savedFiltersList" class="library-list"></div></section>
+        <section><h3>最近阅读</h3><div id="recentReadingList" class="library-list"></div></section>
+      </div>
+    </div>
+
+    <div class="parsed-bar" id="parsedBar" hidden>
+      <span class="parsed-label">已识别检索条件</span>
+      <div id="parsedChips" class="parsed-chips"></div>
+      <span class="parsed-keywords" id="parsedKeywords"></span>
+    </div>
+  </div>
+</section>
+
+<main class="wrap layout" id="mainContent">
+  <aside class="filters" id="filterPanel" aria-label="精确筛选">
+    <div class="panel filters-panel">
+      <div class="panel-head">
+        <h2>精确筛选</h2>
+        <button class="link-btn" id="resetFilters">重置</button>
+      </div>
+
+      <div class="field">
+        <label for="schoolInput">学校 / 机构</label>
+        <input id="schoolInput" type="text" placeholder="如：浙江大学、浙江工业大学" list="schoolList">
+        <datalist id="schoolList"></datalist>
+      </div>
+
+      <div class="field">
+        <label>文献层次 <span class="hint">可多选</span></label>
+        <div class="checks" id="levelChecks"></div>
+      </div>
+
+      <div class="field">
+        <label for="minDownloads">下载量下限 <b id="downloadValue">不限</b></label>
+        <input id="minDownloads" type="range" min="0" max="12000" step="500" value="0">
+      </div>
+
+      <div class="field">
+        <label for="minCitations">被引量下限 <b id="citationValue">不限</b></label>
+        <input id="minCitations" type="range" min="0" max="600" step="10" value="0">
+      </div>
+
+      <div class="field two-col">
+        <div><label for="yearFrom">起始年份</label><input id="yearFrom" type="number" min="2000" max="2026" placeholder="不限"></div>
+        <div><label for="yearTo">截止年份</label><input id="yearTo" type="number" min="2000" max="2026" placeholder="不限"></div>
+      </div>
+
+      <div class="field">
+        <label for="fieldSelect">学科方向</label>
+        <select id="fieldSelect"><option value="">全部方向</option></select>
+      </div>
+
+      <div class="field">
+        <label for="kindSelect">文献类型</label>
+        <select id="kindSelect">
+          <option value="">全部类型</option>
+          <option value="期刊">期刊论文</option>
+          <option value="学位论文">学位论文</option>
+          <option value="会议">会议论文</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label class="switch-line"><input type="checkbox" id="oaOnly"> 仅看开放获取 OA（可优先找原文）</label>
+      </div>
+
+      <div class="field">
+        <label for="langSelect">论文语言</label>
+        <select id="langSelect">
+          <option value="">不限语言</option>
+          <option value="zh">中文</option>
+          <option value="en">英文（可一键中译）</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="sortSelect">排序依据</label>
+        <select id="sortSelect">
+          <option value="relevance">相关度</option>
+          <option value="downloads">下载量</option>
+          <option value="citations">被引量</option>
+          <option value="year">发表时间</option>
+        </select>
+      </div>
+
+      <div class="filter-foot">
+        <span>检索不调用大模型 · 结果可复核</span>
+      </div>
+    </div>
+
+    <div class="panel tip-panel">
+      <h3>深度审查依据</h3>
+      <p>参考学术文献核查五步法，逐项给出<strong>证据强度</strong>与<strong>待人工核验项</strong>，不替用户下结论。</p>
+      <ol class="audit-steps">
+        <li>来源核查</li><li>方法核查</li><li>数据核查</li><li>引用核查</li><li>结论核查</li>
+      </ol>
+    </div>
+  </aside>
+
+  <section class="results">
+    <div class="results-head">
+      <div>
+        <h2 id="resultTitle">文献检索结果</h2>
+        <p id="resultCount" aria-live="polite">正在载入演示数据集…</p>
+      </div>
+      <button class="btn btn-ghost btn-sm mobile-only" id="advancedToggle" aria-expanded="false" aria-controls="filterPanel">展开筛选</button>
+    </div>
+
+    <p class="sr-only" id="searchStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+
+    <div class="workflow-note">
+      <span class="step">① 检索</span><span class="arrow">→</span>
+      <span class="step">② 勾选文献</span><span class="arrow">→</span>
+      <span class="step">③ 选择审查强度</span><span class="arrow">→</span>
+      <span class="step accent">④ 此时才调用 AI</span>
+    </div>
+
+    <div id="resultList" class="result-list" aria-busy="false"></div>
+    <div id="emptyState" class="empty" hidden>
+      <div class="empty-icon">⌕</div>
+      <h3>没有命中符合条件的文献</h3>
+      <p>试着放宽下载量 / 被引量，或删掉学校与层次限制。检索式里的关键词也可以更短一些。</p>
+      <button class="btn btn-primary" id="emptyRetry" hidden>重试检索</button>
+      <button class="btn btn-outline" id="demoFallback" hidden>切回演示数据集</button>
+      <button class="btn btn-outline" id="emptyReset">清空条件重来</button>
+    </div>
+  </section>
+</main>
+
+<div class="basket-bar" id="basketBar" hidden>
+  <div class="wrap basket-inner">
+    <div class="basket-left">
+      <span class="basket-count" id="basketCount">0</span>
+      <div><b>对比篮</b><small id="basketHint">勾选 2–5 篇同质论文，可提取共同点与创新点</small></div>
+    </div>
+    <div class="basket-items" id="basketItems"></div>
+    <div class="basket-actions">
+      <button class="btn btn-ghost btn-sm" id="clearBasket">清空</button>
+      <button class="btn btn-primary" id="compareBtn" disabled>多篇对比分析</button>
+    </div>
+  </div>
+</div>
+
+<div class="backdrop" id="reviewBackdrop" hidden></div>
+<aside class="review-panel" id="reviewPanel" hidden role="dialog" aria-modal="true" aria-labelledby="reviewTitle" aria-describedby="reviewEvidence">
+  <div class="review-head">
+    <div>
+      <div class="review-kicker" id="reviewKicker">AI 审查报告</div>
+      <h2 id="reviewTitle">审查结果</h2>
+    </div>
+    <button class="icon-btn" id="reviewClose" aria-label="关闭">×</button>
+  </div>
+  <div class="review-toolbar">
+    <span class="evidence-note" id="reviewEvidence"></span>
+    <div class="review-actions">
+      <button class="btn btn-outline btn-sm" id="exportBtn" disabled>导出 .md</button>
+      <button class="btn btn-primary btn-sm" id="exportPdfBtn" disabled>导出 PDF</button>
+    </div>
+  </div>
+  <div class="review-body" id="reviewBody" aria-live="polite"></div>
+</aside>
+
+<div class="modal" id="importModal" hidden role="dialog" aria-modal="true" aria-labelledby="importTitle" aria-describedby="importDescription">
+  <div class="modal-card">
+    <div class="modal-head"><h2 id="importTitle">导入题录 · 知网 / PubScholar / 万方</h2><button class="icon-btn" id="importClose" aria-label="关闭导入题录">×</button></div>
+    <div class="modal-body">
+      <p class="modal-lead" id="importDescription">兼容三条中文文献来源：<strong>知网 CNKI</strong>（学校 WebVPN 会话级代理，需本人在浏览器登录）、
+        <strong>PubScholar 公益学术平台</strong>（免费开放，结果带原文链接 / OA / 引用 / 翻译）、
+        <strong>万方数据</strong>（通常需机构账号）。在各自站内检索后导出题录，再在这里导入。
+        系统不代登录、不抓取网页、不下载全文，只处理你已合法取得的题录元数据。</p>
+
+      <div class="import-steps">
+        <span>① 在平台登录 / 检索</span><span>② 勾选文献并导出题录</span><span>③ 选择来源平台</span><span>④ 在此导入 → 直接参与检索与审查</span>
+      </div>
+
+      <div class="field">
+        <label for="importPlatform">题录来源平台 <span class="hint">会标注在结果卡片上，便于答辩说明数据来源</span></label>
+        <select id="importPlatform">
+          <option value="CNKI · 学校 WebVPN">知网 CNKI（学校 WebVPN 登录后导出）</option>
+          <option value="PubScholar">PubScholar 公益学术平台</option>
+          <option value="万方数据">万方数据知识服务平台</option>
+          <option value="其他 / 自建库">其他平台 / 自建题录库</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="importFile">选择导出文件（.csv / .txt / .bib / .enw / .ris / .json / .pdf）</label>
+         <input type="file" id="importFile" accept=".csv,.txt,.bib,.enw,.ris,.json,.pdf,application/pdf">
+      </div>
+      <div class="field">
+        <label for="importText">或直接粘贴题录内容 / 检索结果页文字</label>
+        <textarea id="importText" rows="7" placeholder="题名,作者,单位,文献来源,发表时间,下载量,被引,摘要,关键词&#10;基于深度学习的…,张三;李四,杭州电子科技大学,计算机学报,2024-05,1234,56,本文提出…,深度学习;图像分类"></textarea>
+      </div>
+
+      <div class="import-mapping" id="importMapping" hidden aria-label="CSV 字段映射"></div>
+
+      <div class="import-preview" id="importPreview" hidden aria-live="polite"></div>
+      <div class="import-status">当前已导入 <b id="importCount">0</b> 条题录 · <span id="importHint">导入后可立即用搜索框检索</span></div>
+
+      <div class="supported-formats">
+        <b>支持的格式</b>
+        <p>CSV / Excel 另存（表头含「题名 / 篇名 / 刊名 / 被引次数」等知网、万方列名均可）、<b>BibTeX</b>（PubScholar / Zotero / 万方通用，.bib）、EndNote·RefWorks·NoteExpress 标签格式（TI/T1、AU/A1、PY/YR、SO/JF、AB、KW）、JSON 数组、<b>PDF 文献文件</b>（自动提取标题/作者/年份等元数据）、以及直接复制的结果页文字（尽力解析）。</p>
+        <p>导出文件若不含下载量 / 被引量 / 层次，这几项筛选对导入题录不生效；深度审查会把缺失字段一律标成「需人工核验」，不会编造实验细节。</p>
+      </div>
+      <p class="modal-warn">请遵守学校图书馆与知网的使用条款：仅限本人账号、仅限教学科研用途、不要批量抓取或分发全文。导入数据只保存在<span data-web="本机浏览器" data-desktop="本机">本机浏览器</span>，不会上传。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" id="importClear">清空已导入</button>
+      <button class="btn btn-ghost btn-sm" id="undoImport" hidden>撤销上次导入</button>
+      <button class="btn btn-outline btn-sm" id="importPreviewBtn">解析并预览</button>
+      <button class="btn btn-primary" id="importSave" disabled>确认导入</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="settingsModal" hidden role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="modal-card">
+    <div class="modal-head"><h2 id="settingsTitle">接入设置</h2><button class="icon-btn" id="settingsClose" aria-label="关闭接入设置">×</button></div>
+    <div class="modal-body">
+      <p class="modal-lead">原型默认使用内置演示数据 + 本地审查引擎，<b>离线即可完整演示</b>。接上真实服务后，检索与分析仍然是分开的两层。</p>
+      <div class="field">
+        <label for="cfgSource">检索数据源</label>
+        <select id="cfgSource">
+          <option value="demo">内置演示数据集（离线、可复现）</option>
+          <option value="openalex">OpenAlex 公开学术库（联网、真实元数据）</option>
+          <option value="custom">自定义检索接口 /api/search</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="cfgAI">分析引擎</label>
+        <select id="cfgAI">
+          <option value="demo">本地审查引擎（离线、结构化、无幻觉）</option>
+          <option value="openai">OpenAI 兼容 chat/completions 接口</option>
+          <option value="custom">自定义审查接口 /api/review</option>
+        </select>
+      </div>
+      <div class="field"><label for="cfgBase">API Base URL</label><input id="cfgBase" placeholder="https://api.example.com/v1"></div>
+      <div class="field"><label for="cfgKey">API Key（<span data-web="仅存本机浏览器" data-desktop="仅存本机">仅存本机浏览器</span>）</label><input id="cfgKey" type="password" placeholder="sk-..."></div>
+      <div class="field"><label for="cfgModel">模型名</label><input id="cfgModel" placeholder="例如 deepseek-chat / gpt-4o-mini"></div>
+      <div class="field"><label for="cfgOpenAlexKey">OpenAlex API Key（可选，仅存当前会话）</label><input id="cfgOpenAlexKey" type="password" placeholder="配置后启用游标分页"></div>
+      <div class="modal-note">
+        <b>关于学校 WebVPN（hdu.edu.cn）</b>
+        <p>WebVPN 需要你在浏览器里用学校账号交互式登录，会话 Cookie 只属于你当前的浏览器，前端页面无法复用，也<strong>绝不要把账号密码写进代码或配置</strong>。推荐做法是登录后用知网站内「导出题录」，再点顶部「导入题录」（PubScholar / 万方同理）。</p>
+        <p>若要做成自动检索，请由<strong>本机后端</strong>实现 <code>POST /api/search</code>：会话凭据只放后端环境变量，仅转发你手动发起的单条检索、仅取题录元数据、不批量抓取、不下载全文，返回 <code>{ items: [Paper], note }</code> 即可。前端选「自定义检索接口」就能接上。</p>
+      </div>
+      <p class="modal-warn">浏览器直连第三方 API 可能遇到跨域限制，正式部署请走后端代理。知网没有面向个人的公开检索 API，请勿依赖爬虫抓取；合规接入方式见 README。</p>
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" id="cfgSave">保存设置</button></div>
+  </div>
+</div>
+
+<div class="modal" id="helpModal" hidden role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+  <div class="modal-card">
+    <div class="modal-head"><h2 id="helpTitle">三步上手</h2><button class="icon-btn" id="helpClose" aria-label="关闭使用说明">×</button></div>
+    <div class="modal-body help-body">
+      <div class="help-item"><b>1 · 找论文</b><p>直接输入关键词，或把「学校 / 层次 / 下载量 / 年份 / 引用 / 语言」写进同一个检索式，系统会自动解析成筛选条件。这一步是纯检索，不会调用大模型。</p></div>
+      <div class="help-item"><b>2 · 选文献</b><p>结果卡片显示层次、机构、下载与被引。可加入对比篮（最多 5 篇），也可以对单篇直接操作。</p></div>
+      <div class="help-item"><b>3 · 定强度</b><p><strong>轻度审查</strong>≈30 秒读懂一篇：三句话概要、术语速查、适合谁读。<strong>深度审查</strong>按来源/方法/数据/引用/结论五步核查，附创新点、局限与待核验清单。英文论文可一键中译，「引用」按钮直接给 GB/T 7714 与 BibTeX。</p></div>
+      <div class="help-item"><b>4 · 带走结果</b><p>报告可导出 PDF 或 Markdown 笔记；多篇对比会给出共同点、差异矩阵与综述骨架。</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="splash" id="splash" role="status" aria-live="polite">
+  <div class="splash-inner">
+    <div class="splash-mark">PL</div>
+    <div class="splash-title">研途 · 科研入门助手</div>
+    <div class="spinner"></div>
+    <p class="splash-quote" id="splashQuote">“提出一个问题往往比解决一个问题更重要。”</p>
+    <p class="splash-author" id="splashAuthor">—— 爱因斯坦</p>
+  </div>
+</div>
+
+<div class="login-overlay" id="loginOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+  <div class="login-card">
+    <div class="login-brand">
+      <span class="brand-mark">PL</span>
+      <div><b id="loginTitle">研途 · 登录</b><small>登录后进入科研检索工作台</small></div>
+    </div>
+
+    <div class="login-tabs" role="tablist">
+      <button class="login-tab on" data-tab="login" role="tab" aria-selected="true">登录</button>
+      <button class="login-tab" data-tab="register" role="tab" aria-selected="false">创建账户</button>
+    </div>
+
+    <div class="login-pane" id="loginPane">
+      <div class="field">
+        <label for="loginName">账户名</label>
+        <input id="loginName" type="text" autocomplete="off" placeholder="输入账户名" list="accountDatalist">
+        <datalist id="accountDatalist"></datalist>
+      </div>
+      <div class="field">
+        <label for="loginPass">密码</label>
+        <input id="loginPass" type="password" placeholder="输入密码">
+      </div>
+      <button class="btn btn-primary login-submit" id="loginBtn" type="button">登录</button>
+    </div>
+
+    <div class="login-pane" id="registerPane" hidden>
+      <div class="field">
+        <label for="regName">账户名 <span class="hint">不能与已有账户重名</span></label>
+        <input id="regName" type="text" autocomplete="off" placeholder="设置账户名（中英文 / 数字 / 下划线）">
+      </div>
+      <div class="field">
+        <label for="regPass">密码</label>
+        <input id="regPass" type="password" placeholder="设置密码（至少 4 位）">
+      </div>
+      <div class="field">
+        <label for="regPass2">确认密码</label>
+        <input id="regPass2" type="password" placeholder="再次输入密码">
+      </div>
+      <button class="btn btn-primary login-submit" id="regBtn" type="button">创建账户</button>
+    </div>
+
+    <div class="login-error" id="loginError" hidden></div>
+
+    <div class="account-manager">
+      <button class="link-btn" id="manageAccountsToggle" aria-expanded="false" aria-controls="accountManagerList">管理账户（共 <b id="accountCount">0</b> 个）</button>
+      <div class="account-list" id="accountManagerList" hidden></div>
+    </div>
+
+    <p class="login-note">账户数据仅保存在<span data-web="本机浏览器" data-desktop="本机">本机浏览器</span>，可无限创建、可随时删除；每次进入本页都需要重新登录。</p>
+  </div>
+</div>
+
+<div class="print-report" id="printReport"></div>
+
+<div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+
+<script src="assets/data.js"></script>
+<script src="assets/engine.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

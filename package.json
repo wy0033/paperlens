@@ -1,0 +1,42 @@
+{
+  "name": "paperlens-desktop",
+  "version": "1.0.0",
+  "description": "研途 · 面向科研新手的检索与审查工作台（桌面版）",
+  "author": "PaperLens",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64",
+    "build:dir": "electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.paperlens.app",
+    "productName": "研途",
+    "afterPack": "build-hooks/afterPack.js",
+    "directories": { "output": "dist" },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "manifest.webmanifest",
+      "sw.js",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": [ "nsis" ],
+      "icon": "assets/icons/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

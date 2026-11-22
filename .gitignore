@@ -1,0 +1,5 @@
+node_modules/
+dist/*
+!dist/研途 Setup 1.0.0.exe
+*.log
+.DS_Store
