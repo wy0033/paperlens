@@ -33,8 +33,8 @@ em{font-style:normal;color:var(--primary)}
 .brand-text{display:flex;flex-direction:column;line-height:1.2}
 .brand-text b{font-size:16px;letter-spacing:.2px}
 .brand-text small{color:var(--muted);font-size:11px;margin-top:3px}
-.topbar-right{display:flex;align-items:center;gap:8px}
-.mode-badge{background:var(--green-soft);color:var(--green);border:1px solid #c7ecd6;border-radius:20px;padding:4px 11px;font-size:12px;font-weight:600}
+.topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.mode-badge{background:var(--green-soft);color:var(--green);border:1px solid #c7ecd6;border-radius:20px;padding:4px 11px;font-size:12px;font-weight:600;white-space:nowrap}
 
 /* buttons */
 .btn{border:1px solid transparent;border-radius:9px;padding:9px 16px;font-weight:600;transition:.16s;white-space:nowrap}
@@ -48,6 +48,7 @@ em{font-style:normal;color:var(--primary)}
 .btn-ghost:hover{background:var(--surface-2)}
 .link-btn{border:0;background:none;color:var(--primary);font-size:12.5px;padding:0}
 .link-btn:hover{text-decoration:underline}
+.link-btn.on{color:var(--primary-dark);font-weight:700;text-decoration:none;background:var(--primary-soft);padding:2px 9px;border-radius:6px}
 .icon-btn{border:0;background:transparent;font-size:24px;line-height:1;color:var(--muted);padding:2px 8px;border-radius:8px}
 .icon-btn:hover{background:var(--surface-2);color:var(--ink)}
 
@@ -107,6 +108,16 @@ em{font-style:normal;color:var(--primary)}
 .workflow-note .step{color:var(--ink-2);font-weight:600}
 .workflow-note .step.accent{color:var(--primary);background:var(--primary-soft);padding:2px 9px;border-radius:6px}
 .workflow-note .arrow{color:#b7c3d8}
+/* 筛选条件把导入题录挡住时的解释条 */
+.filter-hint{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;line-height:1.7;
+  background:var(--amber-soft);border-left:3px solid var(--amber);border-radius:0 9px 9px 0;padding:10px 14px;margin-bottom:14px;color:#7b4a0c}
+.filter-hint b{color:#6a3d05}
+.filter-hint span{color:#8a6531}
+.filter-hint .link-btn{color:#8a5a10;text-decoration:underline}
+.filter-hint.info{background:var(--primary-soft);border-left-color:var(--primary);color:var(--primary-dark)}
+.filter-hint.info b{color:var(--primary-dark)}
+.filter-hint.info span{color:#3c5a94}
+.filter-hint.info .link-btn{color:var(--primary)}
 .result-list{display:flex;flex-direction:column;gap:12px}
 
 /* paper card */
@@ -351,6 +362,7 @@ html[data-theme="dark"] .topbar,
 html[data-theme="dark"] .searchbox,
 html[data-theme="dark"] .parsed-bar,
 html[data-theme="dark"] .workflow-note,
+html[data-theme="dark"] .filter-hint,
 html[data-theme="dark"] .card,
 html[data-theme="dark"] .empty,
 html[data-theme="dark"] .review-panel,
@@ -384,6 +396,13 @@ html[data-theme="dark"] .hero-eyebrow{border-color:#33406a;color:var(--primary-d
 html[data-theme="dark"] .user-chip{border-color:#33406a}
 html[data-theme="dark"] .login-error{border-color:#5a2b26}
 html[data-theme="dark"] .score-track{background:#2a3550}
+html[data-theme="dark"] .filter-hint{color:#f0c88a;border-left-color:#c98a24}
+html[data-theme="dark"] .filter-hint b{color:#f5d3a0}
+html[data-theme="dark"] .filter-hint span{color:#c9a877}
+html[data-theme="dark"] .filter-hint .link-btn{color:#d9b26a}
+html[data-theme="dark"] .filter-hint.info{color:#a9c3f5;border-left-color:var(--primary)}
+html[data-theme="dark"] .filter-hint.info b{color:#c9d8f7}
+html[data-theme="dark"] .filter-hint.info .link-btn{color:#8fb4f0}
 html[data-theme="dark"] .login-tab.on{box-shadow:0 2px 8px rgba(0,0,0,.4)}
 @media (max-width:640px){
   .user-name{display:none}

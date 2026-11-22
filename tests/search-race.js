@@ -13,7 +13,7 @@ function element(id) {
       dataset: {}, style: {}, checked: false, tagName: 'DIV', listeners,
       classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
       addEventListener(type, handler) { listeners[type] = handler; },
-      setAttribute() {}, querySelector(selector) { return element(id + ':' + selector); },
+      setAttribute() {}, getAttribute() { return ''; }, querySelector(selector) { return element(id + ':' + selector); },
       querySelectorAll() { return []; }, closest() { return null; }, appendChild() {},
       remove() {}, click() { if (listeners.click) listeners.click({ target: this }); }, focus() {},
       scrollTop: 0
@@ -29,6 +29,7 @@ const document = {
   querySelectorAll: () => [],
   addEventListener() {},
   createElement: () => element('temporary'),
+  documentElement: { setAttribute() {}, getAttribute() { return 'light'; } },
   activeElement: null,
   body: { style: {}, appendChild() {} }
 };
@@ -38,7 +39,8 @@ const localStorage = {
 };
 const sandbox = {
   window: { scrollTo() {}, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} } },
-  document, console, Promise, setTimeout, clearTimeout, URLSearchParams,
+  document, console, Promise, setTimeout, clearTimeout, setInterval, clearInterval, navigator: {},
+  URLSearchParams,
   URL: { createObjectURL: () => '', revokeObjectURL() {} }, Blob: function () {}, localStorage,
   fetch: (url, options) => new Promise((resolve, reject) => pending.push({ resolve, reject, options }))
 };

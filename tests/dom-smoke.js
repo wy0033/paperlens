@@ -12,7 +12,8 @@ function el(id) {
     id, hidden: false, disabled: false, value: '', textContent: '', innerHTML: '',
     dataset: {}, style: {}, checked: false, tagName: 'DIV',
     classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
-    addEventListener() {}, querySelector() { return el(id + ':child'); },
+    addEventListener() {}, setAttribute() {}, getAttribute() { return ''; },
+    querySelector() { return el(id + ':child'); },
     closest() { return null; }, appendChild() {}, remove() {}, click() {},
     scrollTop: 0
   });
@@ -24,11 +25,13 @@ const document = {
   querySelectorAll: () => [],
   addEventListener() {},
   createElement: () => el('tmp'),
+  documentElement: { setAttribute() {}, getAttribute() { return 'light'; } },
   body: { style: {}, appendChild() {} }
 };
 
 const sandbox = {
   window: { scrollTo() {} }, document, console, Promise, setTimeout, clearTimeout,
+  setInterval, clearInterval, navigator: {},
   URLSearchParams, URL: { createObjectURL: () => '', revokeObjectURL() {} },
   Blob: function () {}, localStorage: { getItem: () => null, setItem() {} },
   fetch: () => Promise.reject(new Error('offline'))

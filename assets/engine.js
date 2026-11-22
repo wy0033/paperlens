@@ -283,6 +283,15 @@
     return '未分类';
   }
 
+  // 题录导出里「类型 / 层次」写法各异，先归一到检索层使用的三种类型
+  function inferImportKind(raw) {
+    const text = String(raw.kind || '') + ' ' + String(raw.level || '');
+    if (/学位|thesis|dissertation/i.test(text)) return '学位论文';
+    if (/会议|conference|proceedings/i.test(text)) return '会议';
+    if (/期刊|jour|article|journal|核心|SCI|EI|CSSCI|北大/i.test(text)) return '期刊';
+    return '';
+  }
+
   function normalizeImported(raw, i) {
     const title = raw.title || ('未命名题录 ' + (i + 1));
     const ym = String(raw.year || '').match(/(19|20)\d{2}/);
@@ -290,15 +299,22 @@
     const authors = raw.authors || [];
     const keywords = raw.keywords || [];
     const zh = /[\u4e00-\u9fa5]/.test(title);
+    const org = String(raw.org || '').trim();
+    const venue = String(raw.venue || '').trim();
+    const kind = inferImportKind(raw);
+    // 导入题录常常只有题名与作者：缺失字段必须记入 _missing，筛选时才不会被误杀
     const missing = [];
-    ['year', 'level', 'downloads', 'citations', 'kind', 'oa'].forEach(field => {
+    ['year', 'level', 'downloads', 'citations', 'oa'].forEach(field => {
       if (raw[field] == null || raw[field] === '') missing.push(field);
     });
+    if (!org) missing.push('org');
+    if (!venue) missing.push('venue');
+    if (!kind) missing.push('kind');
     if (!raw.field) missing.push('field');
     return {
       id: 'IMP' + (i + 1), title, authors,
-      org: raw.org || '未标注单位', year, venue: raw.venue || '题录导入',
-      kind: '导入题录', level: raw.level || '题录导入', lang: zh ? 'zh' : 'en',
+      org: org || '未标注单位', year, venue: venue || '题录导入',
+      kind: kind || '导入题录', level: raw.level || '题录导入', lang: zh ? 'zh' : 'en',
       downloads: Number(raw.downloads) || 0, citations: Number(raw.citations) || 0,
       field: raw.field || guessField(title, keywords), keywords,
       abstract: raw.abstract || '该条题录未包含摘要，深度审查将基于可用元数据并自动降低证据强度。',
@@ -361,17 +377,18 @@
   }
 
   function parseTagged(text) {
+    // RIS 与 RefWorks / EndNote Tagged 都是「两字符标签 + 值」，RIS 的值前面多一个 “- ”
     const blocks = text.split(/\r?\n\s*\r?\n/).map(b => b.trim()).filter(Boolean);
     const TAG = {
-      TI: 'title', T1: 'title', CT: 'title',
-      AU: 'authors', A1: 'authors', A2: 'authors',
+      TI: 'title', T1: 'title', CT: 'title', ST: 'title',
+      AU: 'authors', A1: 'authors', A2: 'authors', A3: 'authors', A4: 'authors',
       PY: 'year', YR: 'year', Y1: 'year', DA: 'year',
-      SO: 'venue', JF: 'venue', JO: 'venue', T2: 'venue', PB: 'venue',
+      SO: 'venue', JF: 'venue', JO: 'venue', JA: 'venue', T2: 'venue', T3: 'venue', PB: 'venue',
       AB: 'abstract', N2: 'abstract',
       KW: 'keywords', K1: 'keywords',
       AD: 'org', AF: 'org',
-      DO: 'url', UR: 'url', L1: 'url',
-      RT: 'level', DT: 'level',
+      DO: 'url', UR: 'url', L1: 'url', L2: 'url',
+      RT: 'level', TY: 'level', DT: 'level',
       C1: 'downloads', C3: 'citations'
     };
     const out = [];
@@ -384,7 +401,8 @@
         const key = TAG[m[1]];
         if (!key) return;
         hasTag = true;
-        const v = m[2].trim();
+        const v = m[2].trim().replace(/^[-–]\s*/, '');
+        if (!v) return;
         if (key === 'authors' || key === 'keywords') {
           const parts = v.split(/[;；,，|]/).map(x => x.trim()).filter(Boolean);
           rec[key] = rec[key].concat(parts);
@@ -392,6 +410,36 @@
         else if (!rec[key]) rec[key] = v;
       });
       if (hasTag && rec.title) out.push(rec);
+    }
+    return out;
+  }
+
+  // EndNote 导出的 .enw：以 %0 记录类型开头，逐行 %X 字段
+  function parseEndNote(text) {
+    const blocks = text.split(/\r?\n\s*\r?\n/).map(b => b.trim()).filter(Boolean);
+    const out = [];
+    for (const block of blocks) {
+      const rec = { authors: [], keywords: [], title: '', venue: '', year: '', abstract: '', url: '', level: '', org: '' };
+      block.split(/\r?\n/).forEach(line => {
+        const m = line.match(/^%([A-Z0-9@!$])\s+(.*)$/);
+        if (!m) return;
+        const v = m[2].trim();
+        if (!v) return;
+        switch (m[1]) {
+          case 'T': rec.title = v; break;
+          case 'A': rec.authors.push(v); break;
+          case 'D': rec.year = (v.match(/(19|20)\d{2}/) || [v])[0]; break;
+          case 'J': case 'B': case 'I': case 'S': rec.venue = rec.venue || v; break;
+          case 'X': rec.abstract = (rec.abstract ? rec.abstract + ' ' : '') + v; break;
+          case 'K': rec.keywords = rec.keywords.concat(v.split(/[;；,，]/).map(x => x.trim()).filter(Boolean)); break;
+          case 'R': case 'U': rec.url = rec.url || v; break;
+          case '0': rec.level = v; break;
+          case '8': rec.org = rec.org || v; break;
+          case 'C': rec.org = rec.org || v; break;
+          default: break;
+        }
+      });
+      if (rec.title) out.push(rec);
     }
     return out;
   }
@@ -455,8 +503,10 @@
       catch (e) { return { items: [], format: 'JSON', warnings: ['JSON 格式有误：' + e.message] }; }
     } else if (/@(article|inproceedings|book|phdthesis|mastersthesis|thesis|misc)\s*\{/i.test(src)) {
       raws = parseBibtex(src); format = 'BibTeX';
-    } else if (/^(RT|T1|TI|AU|A1)\s/m.test(src)) {
-      raws = parseTagged(src); format = 'EndNote / RefWorks 题录';
+    } else if (/^%[A-Z0-9@!$]\s/m.test(src)) {
+      raws = parseEndNote(src); format = 'EndNote（.enw）题录';
+    } else if (/^(RT|TY|T1|TI|AU|A1)\s/m.test(src)) {
+      raws = parseTagged(src); format = 'EndNote / RefWorks / RIS 题录';
     } else if (/题名|篇名|Title/i.test(src.split(/\r?\n/)[0]) && /[,，\t]/.test(src.split(/\r?\n/)[0])) {
       raws = parseCSV(src, options && options.mapping); format = 'CSV 表格';
     } else {
@@ -477,23 +527,76 @@
     for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
     return s;
   }
+  // PDF 元数据里的中文常写成 UTF-16BE 十六进制串（<FEFF...>），需要单独解码
+  function decodePdfHex(hex) {
+    const clean = String(hex || '').replace(/\s+/g, '');
+    if (!clean || clean.length % 2) return '';
+    const bytes = [];
+    for (let i = 0; i < clean.length; i += 2) bytes.push(parseInt(clean.substr(i, 2), 16));
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) {
+      let out = '';
+      for (let i = 2; i + 1 < bytes.length; i += 2) out += String.fromCharCode((bytes[i] << 8) | bytes[i + 1]);
+      return out.trim();
+    }
+    if (typeof TextDecoder === 'function') {
+      try { return new TextDecoder('utf-8').decode(new Uint8Array(bytes)).replace(/\u0000/g, '').trim(); }
+      catch (e) { /* 退回逐字节解码 */ }
+    }
+    return bytesToLatin1(bytes).replace(/\u0000/g, '').trim();
+  }
+
   function pdfField(src, key) {
-    const re = new RegExp('/' + key + '\\s*\\(((?:\\\\.|[^()\\\\])*)\\)');
+    const re = new RegExp('/' + key + '\\s*(?:\\(((?:\\\\.|[^()\\\\])*)\\)|<([0-9A-Fa-f\\s]*)>)');
     const m = src.match(re);
     if (!m) return '';
-    return m[1].replace(/\\([()\\])/g, '$1').replace(/\\[nrt]/g, ' ').trim();
+    if (m[2] != null) return decodePdfHex(m[2]);
+    return (m[1] || '').replace(/\\([()\\])/g, '$1').replace(/\\[nrt]/g, ' ').trim();
   }
+
+  // 知网下载的 PDF 文件名常是「题名_第一作者」，拆开可以让题名干净、并按作者搜到
+  function splitPdfBaseName(baseName) {
+    const m = String(baseName || '').match(/^(.+?)[_\-\s]+([\u4e00-\u9fa5]{2,4})$/);
+    if (m && m[1].trim().length >= 4) return { title: m[1].trim(), author: m[2].trim() };
+    return { title: String(baseName || '').trim(), author: '' };
+  }
+
+  // 很多期刊 PDF 的 /Title 是排版工具留下的垃圾（Word 默认标题、期刊页眉、文件名本身），不能直接当题名
+  function usablePdfTitle(value) {
+    const s = String(value || '').trim();
+    if (s.length < 6) return '';
+    if (/^(microsoft|untitled|document\d*|doc\d*|word|wps|pdf|新建|无标题|未命名|论文模板|作业|扫描)/i.test(s)) return '';
+    if (/\.(docx?|pdf|wps|caj)$/i.test(s)) return '';
+    if (!/[\u4e00-\u9fa5]/.test(s) && /word|document|untitled|scan|template|layout|typeset/i.test(s)) return '';
+    return s;
+  }
+
+  function hasCjk(value) { return /[\u4e00-\u9fa5]/.test(String(value || '')); }
+
+  // 题名像是排版残留 / 占位名时，界面要主动提示「这条可能读错了」
+  function suspectTitle(value) {
+    const s = String(value || '').trim();
+    if (!s || s.length < 4) return true;
+    if (/^未命名题录/.test(s)) return true;
+    if (/^(microsoft|untitled|document\d*|新建|无标题|未命名|扫描件)/i.test(s)) return true;
+    if (/\.(docx?|pdf|wps|caj)$/i.test(s)) return true;
+    return false;
+  }
+
   function parsePdf(bytes, filename, platform) {
     const src = bytesToLatin1(bytes || []);
-    const title = pdfField(src, 'Title');
+    const metaTitle = usablePdfTitle(pdfField(src, 'Title'));
     const author = pdfField(src, 'Author');
     const subject = pdfField(src, 'Subject');
     const keywords = pdfField(src, 'Keywords');
     const dm = src.match(/\/CreationDate\s*\(D:(\d{4})/) || [];
-    const baseName = String(filename || '').replace(/\.pdf$/i, '').trim();
+    const parsed = splitPdfBaseName(String(filename || '').replace(/\.pdf$/i, ''));
+    // 文件名是中文题名、元数据却只有英文（多半是排版残留）时，优先信文件名
+    const title = (metaTitle && (!hasCjk(parsed.title) || hasCjk(metaTitle))) ? metaTitle : (parsed.title || metaTitle);
+    const authors = author ? author.split(/[;；,，]|\band\b/i).map(x => x.trim()).filter(Boolean)
+      : (parsed.author ? [parsed.author] : []);
     const raw = {
-      title: title || baseName || '未命名 PDF',
-      authors: author ? author.split(/[;；,，]|\band\b/i).map(x => x.trim()).filter(Boolean) : [],
+      title: title || '未命名 PDF',
+      authors,
       org: '',
       year: dm[1] || '',
       venue: '',
@@ -509,9 +612,39 @@
     const item = normalizeImported(raw, 0);
     item.id = 'PDF' + Date.now().toString(36); // 避免与文字题录的 IMPn 主键冲突
     const warnings = [];
-    if (!title) warnings.push('未读取到 PDF 标题，已用文件名代替，请导入后核对');
+    if (!metaTitle) warnings.push('PDF 内置标题缺失或不可用，题名按文件名还原（已去掉作者后缀），请导入后核对');
+    else if (parsed.title && title === parsed.title && metaTitle !== parsed.title) warnings.push('PDF 内置标题与文件名不一致，已优先采用中文文件名，请核对题名');
     warnings.push('PDF 仅提取元数据（标题/作者/年份），下载量、被引、层次等需人工核验');
     return { items: [item], format: 'PDF 文件', warnings };
+  }
+
+  // 修正单条导入题录：重新套用缺失字段规则，id 与来源平台保持不变
+  function reviseImported(item, patch) {
+    const p = patch || {};
+    const keep = field => ((item._missing || []).indexOf(field) >= 0 ? '' : item[field]);
+    const raw = {
+      title: textValue(p.title, item.title),
+      authors: p.authors != null ? arrayValue(p.authors) : (item.authors || []),
+      org: p.org != null ? p.org : '',
+      year: p.year != null ? p.year : keep('year'),
+      venue: p.venue != null ? p.venue : '',
+      downloads: keep('downloads'),
+      citations: keep('citations'),
+      level: keep('level'),
+      kind: item.kind,
+      oa: (item._missing || []).indexOf('oa') >= 0 ? '' : (item.oa ? '1' : ''),
+      field: (item._missing || []).indexOf('field') >= 0 ? '' : item.field,
+      url: p.url != null ? p.url : (item.sourceUrl || item.url || ''),
+      abstract: item.abstract && item.abstract.indexOf('未包含摘要') < 0 ? item.abstract : '',
+      keywords: item.keywords || [],
+      platform: item.platform,
+      sourceChannel: item.sourceChannel
+    };
+    const next = normalizeImported(raw, 0);
+    next.id = item.id;
+    next.platform = item.platform || next.platform;
+    next._imported = true;
+    return next;
   }
 
   function setImported(items) {
@@ -530,32 +663,58 @@
   function mergeImported(existing, incoming) {
     const items = (existing || []).map(x => Object.assign({}, x));
     const seen = new Set(items.map(importedFingerprint));
+    const ids = new Set(items.map(x => x.id));
     const duplicates = [];
-    (incoming || []).forEach(item => {
-      const key = importedFingerprint(item);
-      if (seen.has(key)) duplicates.push(item);
-      else { seen.add(key); items.push(item); }
+    (incoming || []).forEach(source => {
+      const key = importedFingerprint(source);
+      if (seen.has(key)) { duplicates.push(source); return; }
+      // 分批导入时每批都从 IMP1 开始，主键撞车会导致 IndexedDB 覆盖，这里补后缀保证唯一
+      let item = source;
+      if (item.id && ids.has(item.id)) {
+        let n = 2;
+        while (ids.has(item.id + '-' + n)) n++;
+        item = Object.assign({}, item, { id: item.id + '-' + n });
+      }
+      seen.add(key);
+      ids.add(item.id);
+      items.push(item);
     });
     return { items, added: items.length - (existing || []).length, duplicates };
   }
 
   /* ---------------- 2. 检索层：绝不调用 AI ---------------- */
-  function matchFilters(p, f) {
+  const UNKNOWN_ORG = ['', '未标注单位', '未标注机构', '未标注', '未知'];
+  const UNKNOWN_VENUE = ['', '题录导入', '未知'];
+
+  // 逐条列出「为什么没通过筛选」，用于在界面上解释被挡住的导入题录
+  function filterMissReasons(p, f) {
     const missing = p._missing || [];
-    if (f.school && (p.org || '').indexOf(f.school) < 0 && (SCHOOL_ALIAS[f.school] || '') !== p.org) return false;
-    if (f.levels && f.levels.length && !missing.includes('level') && f.levels.indexOf(p.level) < 0) return false;
-    if (f.minDownloads && !missing.includes('downloads') && p.downloads < f.minDownloads) return false;
-    if (f.minCitations && !missing.includes('citations') && p.citations < f.minCitations) return false;
-    if (f.yearFrom && !missing.includes('year') && p.year && p.year < f.yearFrom) return false;
-    if (f.yearTo && !missing.includes('year') && p.year && p.year > f.yearTo) return false;
-    if (f.field && !missing.includes('field') && p.field !== f.field) return false;
-    if (f.lang && p.lang !== f.lang) return false;
-    if (f.kind && !missing.includes('kind') && p.kind && p.kind !== f.kind) return false;
-    if (f.oa && !missing.includes('oa') && !p.oa) return false;
-    if (f.author && (p.authors || []).join(' ').indexOf(f.author) < 0) return false;
-    if (f.venue && (p.venue || '').indexOf(f.venue) < 0) return false;
-    return true;
+    const unknown = field => {
+      if (missing.indexOf(field) >= 0) return true;
+      if (field === 'org') return UNKNOWN_ORG.indexOf(String(p.org || '').trim()) >= 0;
+      if (field === 'venue') return UNKNOWN_VENUE.indexOf(String(p.venue || '').trim()) >= 0;
+      if (field === 'kind') return String(p.kind || '') === '' || String(p.kind || '') === '导入题录';
+      if (field === 'level') return String(p.level || '') === '' || String(p.level || '') === '题录导入';
+      return false;
+    };
+    const reasons = [];
+    // 单位未知时不参与学校筛选：宁可保留并标注「单位待核」，也不能静默丢掉用户刚导入的题录
+    if (f.school && !unknown('org') && (p.org || '').indexOf(f.school) < 0 && (SCHOOL_ALIAS[f.school] || '') !== p.org) reasons.push('学校/机构：' + f.school);
+    if (f.levels && f.levels.length && !unknown('level') && f.levels.indexOf(p.level) < 0) reasons.push('文献层次：' + f.levels.join('、'));
+    if (f.minDownloads && !unknown('downloads') && p.downloads < f.minDownloads) reasons.push('下载量 ≥ ' + num(f.minDownloads));
+    if (f.minCitations && !unknown('citations') && p.citations < f.minCitations) reasons.push('被引量 ≥ ' + num(f.minCitations));
+    if (f.yearFrom && !unknown('year') && p.year && p.year < f.yearFrom) reasons.push(f.yearFrom + ' 年以后');
+    if (f.yearTo && !unknown('year') && p.year && p.year > f.yearTo) reasons.push(f.yearTo + ' 年以前');
+    if (f.field && !unknown('field') && p.field !== f.field) reasons.push('学科方向：' + f.field);
+    if (f.kind && !unknown('kind') && p.kind !== f.kind) reasons.push('文献类型：' + f.kind);
+    if (f.oa && !unknown('oa') && !p.oa) reasons.push('仅看开放获取 OA');
+    if (f.lang && (p.lang || 'zh') !== f.lang) reasons.push(f.lang === 'en' ? '仅英文文献' : '仅中文文献');
+    if (f.author && (p.authors || []).join(' ').indexOf(f.author) < 0) reasons.push('作者：' + f.author);
+    if (f.venue && !unknown('venue') && (p.venue || '').indexOf(f.venue) < 0) reasons.push('刊名：' + f.venue);
+    return reasons;
   }
+
+  function matchFilters(p, f) { return filterMissReasons(p, f).length === 0; }
 
   // 中英同义扩展：让「检索增强生成」这类中文检索式也能命中英文文献
   const SYNONYMS = {
@@ -574,38 +733,95 @@
     '新手': ['novice', 'undergraduate', 'beginner']
   };
 
+  // 归一化：去空格、去标点，让「基于深度学习的…」这类整句检索式也能命中题名
+  function normText(s) {
+    return String(s == null ? '' : s).toLowerCase()
+      .replace(/[\s\u3000]+/g, '')
+      .replace(/[，。、；：！？·—–\-_"'“”‘’（）()\[\]【】《》<>.,;:!?/\\|]+/g, '');
+  }
+
+  // 中文没有空格分词，用二元组重合度兜底：题名多一个字 / 少一个「研究」也能找到
+  function bigramSimilarity(a, b) {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    const A = [], B = new Set();
+    for (let i = 0; i < a.length - 1; i++) A.push(a.slice(i, i + 2));
+    for (let i = 0; i < b.length - 1; i++) B.add(b.slice(i, i + 2));
+    if (!A.length || !B.size) return 0;
+    let hit = 0;
+    for (const g of A) if (B.has(g)) hit++;
+    return hit / Math.max(A.length, B.size);
+  }
+
   function relevance(p, keywords) {
     if (!keywords) return 1;
     const toks = keywords.split(/\s+/).filter(Boolean);
-    const hay = {
-      title: p.title.toLowerCase(),
+    const raw = {
+      title: String(p.title || '').toLowerCase(),
       kw: (p.keywords || []).join(' ').toLowerCase(),
-      abs: (p.abstract || '').toLowerCase(),
-      field: (p.field || '').toLowerCase(),
-      org: (p.org || '').toLowerCase(),
-      venue: (p.venue || '').toLowerCase()
+      abs: String(p.abstract || '').toLowerCase(),
+      field: String(p.field || '').toLowerCase(),
+      org: String(p.org || '').toLowerCase(),
+      venue: String(p.venue || '').toLowerCase(),
+      authors: (p.authors || []).join(' ').toLowerCase(),
+      doi: String(p.doi || p.sourceUrl || p.url || '').toLowerCase()
     };
+    const titleN = normText(p.title);
     let score = 0;
     for (const t of toks) {
       const alts = [t.toLowerCase()].concat((SYNONYMS[t.toLowerCase()] || []).map(x => x.toLowerCase()));
+      let best = 0;
       alts.forEach((k, idx) => {
         const w = idx === 0 ? 1 : 0.5;
-        if (hay.title.indexOf(k) >= 0) score += 6 * w;
-        if (hay.kw.indexOf(k) >= 0) score += 4 * w;
-        if (hay.abs.indexOf(k) >= 0) score += 2 * w;
-        if (hay.field.indexOf(k) >= 0) score += 2 * w;
-        if (hay.org.indexOf(k) >= 0) score += 3 * w;
-        if (hay.venue.indexOf(k) >= 0) score += 1 * w;
+        let s = 0;
+        if (raw.title.indexOf(k) >= 0) s += 6 * w;
+        if (raw.kw.indexOf(k) >= 0) s += 4 * w;
+        if (raw.authors.indexOf(k) >= 0) s += 4 * w;   // 用作者名也能搜到刚导入的题录
+        if (raw.abs.indexOf(k) >= 0) s += 2 * w;
+        if (raw.field.indexOf(k) >= 0) s += 2 * w;
+        if (raw.org.indexOf(k) >= 0) s += 3 * w;
+        if (raw.venue.indexOf(k) >= 0) s += 1 * w;
+        if (raw.doi.indexOf(k) >= 0) s += 3 * w;
+        best = Math.max(best, s);
       });
+      const tN = normText(t);
+      if (tN.length >= 2) {
+        if (titleN.indexOf(tN) >= 0) best = Math.max(best, 6);
+        else if (tN.length >= 4 && titleN.length >= 3 && tN.indexOf(titleN) >= 0) best = Math.max(best, 5);
+        else if (tN.length >= 4) {
+          const sim = bigramSimilarity(tN, titleN);
+          if (sim >= 0.8) best = Math.max(best, 5);
+          else if (sim >= 0.6) best = Math.max(best, 3);
+        }
+      }
+      score += best;
     }
     return score;
   }
 
+  // 导入题录的检索结果 + 被筛掉的明细，界面据此解释「为什么搜不到」
+  function importedMatches(keywords, f) {
+    // 「只看我的题录」是题录库视图，不再叠加学校 / 层次 / 指标条件
+    const active = f && f.importedOnly ? Object.assign({}, f, {
+      school: '', levels: [], minDownloads: 0, minCitations: 0,
+      yearFrom: 0, yearTo: 0, field: '', kind: '', oa: false, lang: '', author: '', venue: ''
+    }) : f;
+    const scored = IMPORTED.map(p => ({ paper: p, reasons: filterMissReasons(p, active), score: relevance(p, keywords) }));
+    const items = scored.filter(x => !x.reasons.length && (!keywords || x.score > 0))
+      .sort((a, b) => b.score - a.score || b.paper.downloads - a.paper.downloads)
+      .map(x => Object.assign({}, x.paper, { _score: x.score }));
+    const excluded = scored.filter(x => x.reasons.length).map(x => ({ title: x.paper.title, reasons: x.reasons }));
+    const noHit = scored.filter(x => !x.reasons.length && keywords && x.score <= 0).map(x => x.paper.title);
+    return { items, excluded, noHit };
+  }
+
   function demoSearch(keywords, f) {
-    const pool = dedupePapers(DATA.papers.concat(IMPORTED));
-    let items = pool.filter(p => matchFilters(p, f));
+    const linked = importedMatches(keywords, f);
+    const base = f.importedOnly ? [] : dedupePapers(DATA.papers);
+    let items = base.filter(p => matchFilters(p, f));
     items = items.map(p => ({ ...p, _score: relevance(p, keywords) }));
     if (keywords) items = items.filter(p => p._score > 0);
+    items = dedupePapers(items.concat(linked.items));
     const sorters = {
       relevance: (a, b) => b._score - a._score || b.downloads - a.downloads,
       downloads: (a, b) => b.downloads - a.downloads,
@@ -614,9 +830,9 @@
     };
     items.sort(sorters[f.sort] || sorters.relevance);
     const note = IMPORTED.length
-      ? '内置拟真数据集 + ' + IMPORTED.length + ' 篇导入题录（知网 / PubScholar / 万方）· 缺失字段保留结果并显示为未知'
+      ? (f.importedOnly ? '仅检索你的 ' + IMPORTED.length + ' 篇导入题录' : '内置拟真数据集 + ' + IMPORTED.length + ' 篇导入题录（知网 / PubScholar / 万方 / PDF）') + ' · 缺失字段保留结果并显示为未知'
       : '内置拟真数据集 · 用于离线演示，非真实知网题录';
-    return Promise.resolve({ items, note });
+    return Promise.resolve({ items, note, importedExcluded: linked.excluded, importedNoHit: linked.noHit });
   }
 
   function reconstructAbstract(inv) {
@@ -699,26 +915,25 @@
 
   // 本地导入题录：无论当前数据源是什么，导入的题录始终参与检索
   function localImportedSearch(keywords, f) {
-    if (!IMPORTED.length) return Promise.resolve([]);
-    let items = IMPORTED.filter(p => matchFilters(p, f)).map(p => Object.assign({}, p, { _score: relevance(p, keywords) }));
-    if (keywords) items = items.filter(p => p._score > 0);
-    items.sort((a, b) => b._score - a._score || b.downloads - a.downloads);
-    return Promise.resolve(items);
+    return importedMatches(keywords, f).items;
   }
 
   function withImported(remotePromise, keywords, f) {
-    return Promise.all([remotePromise, localImportedSearch(keywords, f)]).then(([remote, local]) => {
-      if (!local.length) return remote;
-      const items = dedupePapers(remote.items.concat(local));
-      const note = (remote.note || '') + ' · 另含 ' + local.length + ' 篇本地导入题录（知网 / PubScholar / 万方 / PDF）';
-      return { items, note };
+    const local = importedMatches(keywords, f);
+    return remotePromise.then(remote => {
+      const items = dedupePapers((remote.items || []).concat(local.items));
+      const note = (remote.note || '') + (local.items.length ? ' · 另含 ' + local.items.length + ' 篇本地导入题录（知网 / PubScholar / 万方 / PDF）' : '');
+      return { items, note, importedExcluded: local.excluded, importedNoHit: local.noHit };
     });
   }
 
   function search(keywords, f, cfg) {
-    if (cfg.source === 'openalex') return withImported(openAlexSearch(keywords, f, cfg), keywords, f);
-    if (cfg.source === 'custom') return withImported(customSearch(keywords, f, cfg), keywords, f);
-    return demoSearch(keywords, f);
+    const filter = Object.assign({}, f || {});
+    // 「只看我的题录」不依赖远端数据源，避免网络接口把导入题录覆盖掉
+    if (filter.importedOnly) return demoSearch(keywords, filter);
+    if (cfg.source === 'openalex') return withImported(openAlexSearch(keywords, filter, cfg), keywords, filter);
+    if (cfg.source === 'custom') return withImported(customSearch(keywords, filter, cfg), keywords, filter);
+    return demoSearch(keywords, filter);
   }
 
   /* ---------------- 3. 分析层：按需调用 ---------------- */
@@ -1017,7 +1232,7 @@
 
   window.PaperLens = {
     parseQuery, search, analyze, esc, num,
-    parseBibliography, parsePdf, getImportHeaders, mergeImported, setImported, getImported,
+    parseBibliography, parsePdf, getImportHeaders, mergeImported, setImported, getImported, reviseImported, suspectTitle,
     AUDIT_STEPS, normalizeExternalPaper, dedupePapers, qualitySummary,
     DEMO_AI,
     fields: DATA.FIELDS, levels: DATA.LEVELS, schools: DATA.SCHOOLS

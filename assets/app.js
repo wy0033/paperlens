@@ -328,12 +328,16 @@
 
   function restoreImportedFromDb() {
     loadImportedFromDb().then(items => {
+      const local = PL.getImported();
       if (items.length) {
-        PL.setImported(items);
+        // 浏览器清缓存 / 换存储介质时，localStorage 与 IndexedDB 可能不一致，合并而不是互相覆盖
+        const merged = PL.mergeImported(items, local);
+        PL.setImported(merged.items);
         refreshImportStatus();
+        if (merged.added) saveImportedToDb(merged.items).catch(() => {});
         doSearch(false);
-      } else if (PL.getImported().length) {
-        saveImportedToDb(PL.getImported()).catch(() => {});
+      } else if (local.length) {
+        saveImportedToDb(local).catch(() => {});
       }
     }).catch(() => {});
   }
@@ -342,6 +346,7 @@
     items: [], keywords: '', basket: [], translated: {}, report: null,
     filters: { school: '', levels: [], minDownloads: 0, minCitations: 0, yearFrom: 0, yearTo: 0, field: '', lang: '', sort: 'relevance', kind: '', oa: false, author: '', venue: '' },
     note: '', searchSeq: 0, searchController: null, searchCache: new Map(),
+    onlyImported: false, importedExcluded: [], importedNoHit: [], editingId: '',
     history: readLocalList(HISTORY_KEY), savedFilters: readLocalList(SAVED_FILTERS_KEY), recent: readLocalList(RECENT_KEY),
     pendingImport: null, undoImported: null
   };
@@ -368,7 +373,8 @@
   function updateModeBadge() {
     const map = { demo: '演示数据集', openalex: 'OpenAlex 实时检索', custom: '自定义检索接口' };
     const n = PL.getImported().length;
-    E('modeBadge').textContent = (map[cfg.source] || '演示数据集') + (n ? ' · +' + n + ' 篇导入题录' : '');
+    if (state.onlyImported && n) { E('modeBadge').textContent = '我的题录 · ' + n + ' 篇'; return; }
+    E('modeBadge').textContent = (map[cfg.source] || '演示数据集') + (n ? ' · +' + n + ' 导入' : '');
   }
 
   function renderLibraryList(id, items, kind) {
@@ -498,6 +504,7 @@
     } else {
       state.filters = readFilters();
     }
+    state.filters.importedOnly = !!state.onlyImported;
 
     if (state.searchController) state.searchController.abort();
     const seq = ++state.searchSeq;
@@ -508,6 +515,8 @@
     if (cached && Date.now() - cached.time < 30000) {
       state.items = cached.items;
       state.note = cached.note;
+      state.importedExcluded = cached.excluded || [];
+      state.importedNoHit = cached.noHit || [];
       E('searchBtn').disabled = false;
       E('searchBtn').textContent = '检索文献';
       if (E('resultList').setAttribute) E('resultList').setAttribute('aria-busy', 'false');
@@ -530,7 +539,9 @@
       if (seq !== state.searchSeq || (controller && controller.signal.aborted)) return;
       state.items = res.items || [];
       state.note = res.note || '';
-      state.searchCache.set(cacheKey, { time: Date.now(), items: state.items, note: state.note });
+      state.importedExcluded = res.importedExcluded || [];
+      state.importedNoHit = res.importedNoHit || [];
+      state.searchCache.set(cacheKey, { time: Date.now(), items: state.items, note: state.note, excluded: state.importedExcluded, noHit: state.importedNoHit });
       if (state.searchCache.size > 20) state.searchCache.delete(state.searchCache.keys().next().value);
       E('searchBtn').disabled = false;
       E('searchBtn').textContent = '检索文献';
@@ -554,6 +565,8 @@
     });
   }
 
+  const MISSING_LABEL = { year: '年份', level: '文献层次', downloads: '下载量', citations: '被引量', kind: '文献类型', oa: '开放获取', field: '学科方向', org: '单位', venue: '来源' };
+
   function cardHtml(p) {
     const inBasket = state.basket.indexOf(p.id) >= 0;
     const translated = !!state.translated[p.id];
@@ -561,12 +574,12 @@
     const metric = field => missing.indexOf(field) >= 0 ? '未知' : num(p[field]);
     const abstract = translated && p.lang === 'en' ? (p.abstractZh || p.abstract) : p.abstract;
     const tags = [
-      '<span class="tag level">' + esc(p.level) + '</span>',
-      '<span class="tag field">' + esc(p.field) + '</span>',
+      '<span class="tag level">' + esc(missing.indexOf('level') >= 0 ? '层次待核' : p.level) + '</span>',
+      '<span class="tag field">' + esc(missing.indexOf('field') >= 0 ? '方向待核' : p.field) + '</span>',
       p._imported ? '<span class="tag source">导入题录 · 指标待核</span>' : '',
       p._imported ? '<span class="tag platform">来源：' + esc(p.platform || '导入题录') + '</span>' : '',
       p._external ? '<span class="tag platform">来源：' + esc(p.sourceProvider || '外部接口') + '</span>' : '',
-      missing.length ? '<span class="tag source">缺失字段：' + esc(missing.join('、')) + '</span>' : '',
+      missing.length ? '<span class="tag source">缺失字段：' + esc(missing.map(f => MISSING_LABEL[f] || f).join('、')) + '</span>' : '',
       p.oa ? '<span class="tag oa">开放获取 OA</span>' : '',
       p.retractionStatus === 'retracted' ? '<span class="tag hot">来源标记为撤稿</span>' : '',
       p.downloads >= 5000 ? '<span class="tag hot">高下载</span>' : '',
@@ -593,6 +606,7 @@
               '<span>被引 <b>' + metric('citations') + '</b></span><span>精读约 <b>' + p.minutes + '</b> 分钟</span></div>' +
             '<div class="actions">' +
               '<button class="act" data-act="basket">' + (inBasket ? '移出对比' : '加入对比') + '</button>' +
+              (p._imported ? '<button class="act" data-act="edit">修正题录</button>' : '') +
               '<button class="act" data-act="light">轻度审查</button>' +
               '<button class="act deep" data-act="deep">深度审查</button>' +
               '<button class="act translate' + (translated ? ' on' : '') + '" data-act="translate">' + (translated ? '已译中文 ✓' : '译成中文') + '</button>' +
@@ -604,21 +618,59 @@
       '</div></article>';
   }
 
+  // 说明「为什么刚导入的题录没出现」，并给出一键放宽 / 只看我的题录
+  function renderFilterHint() {
+    const box = E('filterHint');
+    if (!box) return;
+    const n = PL.getImported().length;
+    if (state.onlyImported && n) {
+      const suspect = PL.getImported().filter(x => (PL.suspectTitle ? PL.suspectTitle(x.title) : false));
+      const nh = state.importedNoHit || [];
+      box.className = 'filter-hint ' + (nh.length || suspect.length ? 'warn' : 'info');
+      box.hidden = false;
+      box.innerHTML = '<b>当前只检索你的 ' + n + ' 篇导入题录</b>' +
+        '<span>学校 / 层次 / 下载量等条件不会把它们筛掉，缺失指标显示为「未知」。</span>' +
+        (nh.length ? '<b>有 ' + nh.length + ' 篇题名与检索词不匹配：' + esc(nh.slice(0, 2).join('；')) + (nh.length > 2 ? ' 等' : '') + '</b><span>PDF 读出来的题名常是排版残留，点「修正题录」改成论文真实题名即可被搜到。</span>' : '') +
+        (suspect.length && !nh.length ? '<b>有 ' + suspect.length + ' 条题名可能没读对：' + esc(suspect.slice(0, 2).map(x => x.title).join('；')) + '</b>' : '') +
+        (nh.length || suspect.length ? '<button class="link-btn" data-hint-act="edit">修正题录</button>' : '') +
+        '<button class="link-btn" data-hint-act="all">回到全部文献</button>';
+      return;
+    }
+    const ex = state.importedExcluded || [];
+    const nh = state.importedNoHit || [];
+    if (!ex.length && !nh.length) { box.hidden = true; box.innerHTML = ''; return; }
+    const reasons = [];
+    ex.forEach(item => (item.reasons || []).forEach(r => { if (reasons.indexOf(r) < 0) reasons.push(r); }));
+    let html = '';
+    if (ex.length) html += '<b>有 ' + ex.length + ' 篇导入题录被筛选条件挡住：' + esc(reasons.join('、')) + '</b>';
+    if (nh.length) html += '<b>有 ' + nh.length + ' 篇导入题录与检索词不匹配：' + esc(nh.slice(0, 2).join('；')) + (nh.length > 2 ? ' 等' : '') + '</b>';
+    html += '<span>题录里缺失的字段按「未知」处理，不会被当成 0 分或被编造；题名读错了可在卡片上点「修正题录」。</span>';
+    html += '<button class="link-btn" data-hint-act="relax">放宽条件重搜</button>';
+    if (nh.length === 1) html += '<button class="link-btn" data-hint-act="edit">修正这条题录的题名</button>';
+    if (n) html += '<button class="link-btn" data-hint-act="mine">只看我的题录 (' + n + ')</button>';
+    box.className = 'filter-hint warn';
+    box.hidden = false;
+    box.innerHTML = html;
+  }
+
   function renderResults() {
     const n = state.items.length;
     const quality = PL.qualitySummary(state.items);
     const coverage = Math.round(quality.sourceAndTimeCoverage * 100);
-    E('resultTitle').textContent = state.keywords ? '「' + state.keywords + '」的检索结果' : '文献检索结果';
+    E('resultTitle').textContent = state.keywords ? '「' + state.keywords + '」的检索结果' : (state.onlyImported ? '我的导入题录' : '文献检索结果');
     E('resultCount').textContent = '共 ' + n + ' 篇 · 来源链接与检索时间完整率 ' + coverage + '% · ' + state.note + ' · 本阶段未调用大模型';
     E('resultList').innerHTML = state.items.map(cardHtml).join('');
     E('emptyState').dataset.state = n ? '' : 'empty';
     E('emptyState').hidden = n > 0;
     E('emptyRetry').hidden = true;
     E('demoFallback').hidden = true;
+    renderFilterHint();
     if (!n) {
       E('emptyState').dataset.state = 'empty';
-      E('emptyState').querySelector('h3').textContent = '没有命中符合条件的文献';
-      E('emptyState').querySelector('p').textContent = '试着放宽下载量 / 被引量，或删掉学校与层次限制。检索式里的关键词也可以更短一些。';
+      E('emptyState').querySelector('h3').textContent = state.onlyImported ? '你的题录里没有命中' : '没有命中符合条件的文献';
+      E('emptyState').querySelector('p').textContent = state.onlyImported
+        ? '换一个题名片段或作者名试试；也可以点上方「回到全部文献」检索内置数据集。'
+        : (PL.getImported().length ? '已导入的题录可能被学校 / 层次 / 下载量条件挡住，看上方提示可一键放宽。' : '试着放宽下载量 / 被引量，或删掉学校与层次限制。检索式里的关键词也可以更短一些。');
     }
     E('searchStatus').textContent = n ? '检索完成，共找到 ' + n + ' 篇文献' : '检索完成，没有找到符合条件的文献';
     if (E('resultList').setAttribute) E('resultList').setAttribute('aria-busy', 'false');
@@ -753,7 +805,7 @@
   const modalFocus = {};
   let bodyOverflow = '';
   function syncOverlayScrollLock() {
-    const isOpen = !E('reviewPanel').hidden || ['importModal', 'settingsModal', 'helpModal', 'loginOverlay'].some(id => !E(id).hidden);
+    const isOpen = !E('reviewPanel').hidden || ['importModal', 'editImpModal', 'settingsModal', 'helpModal', 'loginOverlay'].some(id => !E(id).hidden);
     if (isOpen && document.body.style.overflow !== 'hidden') {
       bodyOverflow = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
@@ -784,8 +836,67 @@
   function refreshImportStatus() {
     const n = PL.getImported().length;
     E('importCount').textContent = n;
-    E('importHint').textContent = n ? '已参与检索，可直接搜其题名或关键词' : '导入后可立即用搜索框检索';
+    E('importHint').textContent = n ? '已自动进入「只看我的题录」，可直接搜题名、作者或关键词' : '导入后会立即展示在你的题录里';
     updateModeBadge();
+    syncMineBtn();
+  }
+
+  // 清掉会误伤导入题录的条件，但不动检索词
+  function clearBlockingFilters() {
+    E('schoolInput').value = '';
+    document.querySelectorAll('#levelChecks .check').forEach(x => x.classList.remove('on'));
+    E('minDownloads').value = 0;
+    E('minCitations').value = 0;
+    E('downloadValue').textContent = '不限';
+    E('citationValue').textContent = '不限';
+    E('yearFrom').value = '';
+    E('yearTo').value = '';
+    E('fieldSelect').value = '';
+    E('kindSelect').value = '';
+    E('langSelect').value = '';
+    E('oaOnly').checked = false;
+    state.filters.author = '';
+    state.filters.venue = '';
+  }
+
+  function relaxFiltersAndSearch() {
+    clearBlockingFilters();
+    state.onlyImported = false;
+    state.searchCache.clear();
+    syncMineBtn();
+    updateModeBadge();
+    doSearch(false);
+    toast('已放宽筛选条件，正在重新检索');
+  }
+
+  function showOnlyImported() {
+    clearBlockingFilters();
+    state.onlyImported = true;
+    E('searchInput').value = '';
+    state.keywords = '';
+    E('parsedBar').hidden = true;
+    state.searchCache.clear();
+    syncMineBtn();
+    updateModeBadge();
+    doSearch(false);
+  }
+
+  function showAllSources() {
+    state.onlyImported = false;
+    state.searchCache.clear();
+    syncMineBtn();
+    updateModeBadge();
+    doSearch(false);
+  }
+
+  function syncMineBtn() {
+    const btn = E('mineBtn');
+    if (!btn) return;
+    const n = PL.getImported().length;
+    btn.hidden = !n;
+    btn.textContent = state.onlyImported ? '回到全部文献' : '只看我的题录 (' + n + ')';
+    if (btn.setAttribute) btn.setAttribute('aria-pressed', String(state.onlyImported));
+    if (btn.classList) btn.classList.toggle('on', state.onlyImported);
   }
 
   function showImportPreview(html, warn) {
@@ -793,6 +904,51 @@
     box.hidden = false;
     box.className = 'import-preview' + (warn ? ' warn' : '');
     box.innerHTML = html;
+  }
+
+  /* ---------- 修正单条导入题录（题名读错时不必重新导入） ---------- */
+  function openEditImported(paper) {
+    if (!paper || !paper._imported) return;
+    const missing = paper._missing || [];
+    state.editingId = paper.id;
+    E('editImpTitle').value = paper.title || '';
+    E('editImpAuthors').value = (paper.authors || []).join('; ');
+    E('editImpOrg').value = missing.indexOf('org') >= 0 ? '' : (paper.org || '');
+    E('editImpYear').value = paper.year || '';
+    E('editImpVenue').value = missing.indexOf('venue') >= 0 ? '' : (paper.venue || '');
+    E('editImpUrl').value = paper.sourceUrl || paper.url || '';
+    openModal('editImpModal');
+  }
+
+  function saveImportedEdit() {
+    const item = PL.getImported().find(x => x.id === state.editingId);
+    if (!item) { closeModal('editImpModal'); return; }
+    const title = E('editImpTitle').value.trim();
+    if (!title) { toast('题名不能为空，改好后再保存'); return; }
+    const updated = PL.reviseImported(item, {
+      title,
+      authors: E('editImpAuthors').value.split(/[;；,，]/).map(x => x.trim()).filter(Boolean),
+      org: E('editImpOrg').value.trim(),
+      year: E('editImpYear').value.trim(),
+      venue: E('editImpVenue').value.trim(),
+      url: E('editImpUrl').value.trim()
+    });
+    const items = PL.getImported().map(x => (x.id === updated.id ? updated : x));
+    PL.setImported(items);
+    try { localStorage.setItem(IMPORT_KEY, JSON.stringify(PL.getImported())); }
+    catch (e) { toast('本地存储空间不足，本次修正仅在当前页面有效'); }
+    saveImportedToDb(PL.getImported()).catch(() => {});
+    state.searchCache.clear();
+    closeModal('editImpModal');
+    refreshImportStatus();
+    // 修正后直接按新题名检索一次，让用户确认现在能搜到
+    state.onlyImported = true;
+    E('searchInput').value = title;
+    state.keywords = title;
+    syncMineBtn();
+    updateModeBadge();
+    doSearch(false);
+    toast('已保存修正，正在按新题名检索');
   }
 
   const importFields = [
@@ -840,7 +996,7 @@
     state.pendingImport = res;
     E('importSave').disabled = !res.items.length;
     const previewItems = res.items.slice(0, 4).map(p => '<li>' + esc(p.title) + ' · ' + esc(p.org || '单位待核') + ' · ' + (p.year || '年份待核') + '</li>').join('');
-    showImportPreview('<b>已解析 ' + res.items.length + ' 条（' + esc(res.format) + '）</b><ul>' + previewItems + (res.items.length > 4 ? '<li>… 其余 ' + (res.items.length - 4) + ' 条</li>' : '') + res.warnings.map(w => '<li>提示：' + esc(w) + '</li>').join('') + '</ul>', res.warnings.length > 0 || !res.items.length);
+    showImportPreview('<b>已解析 ' + res.items.length + ' 条（' + esc(res.format) + '）</b><ul>' + previewItems + (res.items.length > 4 ? '<li>… 其余 ' + (res.items.length - 4) + ' 条</li>' : '') + res.warnings.map(w => '<li>提示：' + esc(w) + '</li>').join('') + '<li>提示：题名与论文实际标题不符时，导入后可在卡片上点「修正题录」改正</li></ul>', res.warnings.length > 0 || !res.items.length);
   }
 
   function prepareImport() {
@@ -873,8 +1029,18 @@
     refreshImportStatus();
     state.basket = []; renderBasket();
     state.searchCache.clear();
+    // 导入后直接切到「只看我的题录」：先让用户看到自己的题录，再决定要不要放宽条件
+    if (merged.added > 0) {
+      state.onlyImported = true;
+      clearBlockingFilters();
+      E('searchInput').value = '';
+      state.keywords = '';
+      E('parsedBar').hidden = true;
+      syncMineBtn();
+      updateModeBadge();
+    }
     doSearch(false);
-    toast('已新增 ' + merged.added + ' 条题录，可直接检索');
+    toast(merged.added > 0 ? '已新增 ' + merged.added + ' 条题录，正在展示你的题录' : '没有新增题录，当前仍是已有题录');
   }
 
   function undoImport() {
@@ -896,6 +1062,7 @@
     clearImportedFromDb().catch(() => {});
     PL.setImported([]);
     state.undoImported = null;
+    state.onlyImported = false;
     E('undoImport').hidden = true;
     refreshImportStatus();
     showImportPreview('<b>已清空导入题录</b><ul><li>内置演示数据集保持不变</li></ul>', false);
@@ -979,6 +1146,24 @@
       E('queryToolsToggle').setAttribute('aria-expanded', String(open));
     });
     E('saveFiltersBtn').addEventListener('click', saveCurrentFilters);
+    E('mineBtn').addEventListener('click', () => {
+      if (state.onlyImported) showAllSources(); else showOnlyImported();
+    });
+    E('filterHint').addEventListener('click', e => {
+      const btn = e.target.closest('[data-hint-act]');
+      if (!btn) return;
+      const act = btn.dataset.hintAct;
+      if (act === 'relax') relaxFiltersAndSearch();
+      else if (act === 'mine') showOnlyImported();
+      else if (act === 'all') showAllSources();
+      else if (act === 'edit') {
+        const titles = state.importedNoHit || [];
+        const all = PL.getImported();
+        const hit = all.find(x => titles.indexOf(x.title) >= 0) ||
+          all.find(x => PL.suspectTitle && PL.suspectTitle(x.title)) || all[0];
+        if (hit) openEditImported(hit);
+      }
+    });
     E('queryToolsPanel').addEventListener('click', e => {
       const button = e.target.closest('[data-library-action]');
       if (!button) return;
@@ -1002,6 +1187,7 @@
       if (!p) return;
       const act = btn.dataset.act;
       if (act === 'basket') { toggleBasket(p.id); }
+      else if (act === 'edit') openEditImported(p);
       else if (act === 'light') openReview('light', p, '轻度审查');
       else if (act === 'deep') openReview('deep', p, '深度审查 · 五步核查');
       else if (act === 'path') openReview('path', p, '相关学习内容推荐');
@@ -1035,7 +1221,7 @@
     E('exportPdfBtn').addEventListener('click', exportPdf);
     document.addEventListener('keydown', e => {
       const loginOpen = !E('loginOverlay').hidden;
-      const openModalId = ['importModal', 'settingsModal', 'helpModal'].slice().reverse().find(id => !E(id).hidden);
+      const openModalId = ['importModal', 'editImpModal', 'settingsModal', 'helpModal'].slice().reverse().find(id => !E(id).hidden);
       const topModal = openModalId ? E(openModalId) : null;
       const reviewOpen = !E('reviewPanel').hidden;
       const root = loginOpen ? E('loginOverlay') : (topModal || (reviewOpen ? E('reviewPanel') : null));
@@ -1055,7 +1241,11 @@
         }
       }
     });
-    ['importModal', 'settingsModal', 'helpModal'].forEach(id => E(id).addEventListener('click', e => { if (e.target === E(id)) closeModal(id); }));
+    ['importModal', 'editImpModal', 'settingsModal', 'helpModal'].forEach(id => E(id).addEventListener('click', e => { if (e.target === E(id)) closeModal(id); }));
+
+    E('editImpClose').addEventListener('click', () => closeModal('editImpModal'));
+    E('editImpCancel').addEventListener('click', () => closeModal('editImpModal'));
+    E('editImpSave').addEventListener('click', saveImportedEdit);
 
     E('settingsBtn').addEventListener('click', () => openModal('settingsModal'));
     E('settingsClose').addEventListener('click', () => closeModal('settingsModal'));
@@ -1079,9 +1269,12 @@
 
   function resetAll() {
     state.keywords = '';
+    state.onlyImported = false;
     state.filters = { school: '', levels: [], minDownloads: 0, minCitations: 0, yearFrom: 0, yearTo: 0, field: '', lang: '', sort: 'relevance', kind: '', oa: false, author: '', venue: '' };
     E('parsedBar').hidden = true;
     syncFiltersToUI(state.filters);
+    syncMineBtn();
+    updateModeBadge();
     doSearch(false);
   }
 

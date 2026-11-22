@@ -65,6 +65,7 @@
       <div class="search-library-actions">
         <button class="link-btn" id="queryToolsToggle" aria-expanded="false" aria-controls="queryToolsPanel">历史、已保存与最近阅读</button>
         <button class="link-btn" id="saveFiltersBtn">保存当前条件</button>
+        <button class="link-btn" id="mineBtn" hidden aria-pressed="false">只看我的题录</button>
       </div>
       <div class="search-library-panel" id="queryToolsPanel" hidden>
         <section><h3>检索历史</h3><div id="queryHistoryList" class="library-list"></div></section>
@@ -185,6 +186,8 @@
       <span class="step accent">④ 此时才调用 AI</span>
     </div>
 
+    <div id="filterHint" class="filter-hint" hidden aria-live="polite"></div>
+
     <div id="resultList" class="result-list" aria-busy="false"></div>
     <div id="emptyState" class="empty" hidden>
       <div class="empty-icon">⌕</div>
@@ -270,7 +273,7 @@
       <div class="supported-formats">
         <b>支持的格式</b>
         <p>CSV / Excel 另存（表头含「题名 / 篇名 / 刊名 / 被引次数」等知网、万方列名均可）、<b>BibTeX</b>（PubScholar / Zotero / 万方通用，.bib）、EndNote·RefWorks·NoteExpress 标签格式（TI/T1、AU/A1、PY/YR、SO/JF、AB、KW）、JSON 数组、<b>PDF 文献文件</b>（自动提取标题/作者/年份等元数据）、以及直接复制的结果页文字（尽力解析）。</p>
-        <p>导出文件若不含下载量 / 被引量 / 层次，这几项筛选对导入题录不生效；深度审查会把缺失字段一律标成「需人工核验」，不会编造实验细节。</p>
+        <p>导出文件若不含单位 / 层次 / 下载量 / 被引量，这几项筛选对导入题录<b>不生效</b>：题录会保留在结果里，缺失指标显示为「未知」，不会被当成 0 分淘汰。确认导入后会自动切到「只看我的题录」，被条件挡住时结果区会提示一键放宽。深度审查把缺失字段一律标成「需人工核验」，不会编造实验细节。</p>
       </div>
       <p class="modal-warn">请遵守学校图书馆与知网的使用条款：仅限本人账号、仅限教学科研用途、不要批量抓取或分发全文。导入数据只保存在<span data-web="本机浏览器" data-desktop="本机">本机浏览器</span>，不会上传。</p>
     </div>
@@ -279,6 +282,35 @@
       <button class="btn btn-ghost btn-sm" id="undoImport" hidden>撤销上次导入</button>
       <button class="btn btn-outline btn-sm" id="importPreviewBtn">解析并预览</button>
       <button class="btn btn-primary" id="importSave" disabled>确认导入</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="editImpModal" hidden role="dialog" aria-modal="true" aria-labelledby="editImpHeading">
+  <div class="modal-card">
+    <div class="modal-head"><h2 id="editImpHeading">修正题录</h2><button class="icon-btn" id="editImpClose" aria-label="关闭修正题录">×</button></div>
+    <div class="modal-body">
+      <p class="modal-lead">PDF 里内置的标题常是排版残留，读出来会和真实题名差很远。改完保存即可立刻参与检索，指标缺失仍按「需人工核验」处理。</p>
+      <div class="field">
+        <label for="editImpTitle">题名 <span class="hint">可用题名片段或作者检索</span></label>
+        <input id="editImpTitle" type="text" placeholder="粘贴论文真实题名">
+      </div>
+      <div class="field two-col">
+        <div><label for="editImpAuthors">作者（用 ; 分隔）</label><input id="editImpAuthors" type="text" placeholder="马晨龙"></div>
+        <div><label for="editImpOrg">单位 / 机构</label><input id="editImpOrg" type="text" placeholder="杭州电子科技大学"></div>
+      </div>
+      <div class="field two-col">
+        <div><label for="editImpYear">年份</label><input id="editImpYear" type="number" min="1990" max="2026" placeholder="2024"></div>
+        <div><label for="editImpVenue">来源 / 刊名</label><input id="editImpVenue" type="text" placeholder="计算机学报"></div>
+      </div>
+      <div class="field">
+        <label for="editImpUrl">DOI / 原文链接</label>
+        <input id="editImpUrl" type="text" placeholder="https://doi.org/…">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" id="editImpCancel">取消</button>
+      <button class="btn btn-primary btn-sm" id="editImpSave">保存并重新检索</button>
     </div>
   </div>
 </div>
