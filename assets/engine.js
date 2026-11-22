@@ -527,22 +527,77 @@
     for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
     return s;
   }
+
+  // 中文字体生成的 PDF 常把 /Title 写成 GBK 字节串（有时还是 \351\234\200 这类八进制转义），
+  // 直接按 latin1 读会变成「´O´Ú」这种乱码，所以按字节做一次猜测解码：UTF-8 → GB18030 → latin1
+  function decodeBytesSmart(bytes) {
+    const arr = bytes || [];
+    if (!arr.length) return '';
+    if (arr[0] === 0xFE && arr[1] === 0xFF) {
+      let out = '';
+      for (let i = 2; i + 1 < arr.length; i += 2) out += String.fromCharCode((arr[i] << 8) | arr[i + 1]);
+      return out.replace(/\u0000/g, '').trim();
+    }
+    if (arr[0] === 0xFF && arr[1] === 0xFE) {   // UTF-16LE（少数导出工具会这么写）
+      let out = '';
+      for (let i = 2; i + 1 < arr.length; i += 2) out += String.fromCharCode((arr[i + 1] << 8) | arr[i]);
+      return out.replace(/\u0000/g, '').trim();
+    }
+    // 无 BOM 的 UTF-16BE：高位字节几乎全是 0
+    if (arr.length >= 4 && arr.length % 2 === 0) {
+      let oddZero = 0, even = 0;
+      for (let i = 0; i + 1 < arr.length; i += 2) { if (arr[i] === 0) oddZero++; if (arr[i + 1] !== 0) even++; }
+      if (oddZero >= arr.length / 2 - 1 && even === 0) {
+        let out = '';
+        for (let i = 0; i < arr.length; i += 2) out += String.fromCharCode((arr[i] << 8) | arr[i + 1]);
+        return out.replace(/\u0000/g, '').trim();
+      }
+    }
+    if (typeof TextDecoder === 'function') {
+      try {
+        const utf8 = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(arr));
+        if (utf8 && !/\uFFFD/.test(utf8)) return utf8.replace(/\u0000/g, '').trim();
+      } catch (e) { /* 不是合法 UTF-8，继续尝试 GB18030 */ }
+      try {
+        const gb = new TextDecoder('gb18030', { fatal: true }).decode(new Uint8Array(arr));
+        if (gb) return gb.replace(/\u0000/g, '').trim();
+      } catch (e) { /* 也不是 GB18030，退回逐字节 */ }
+    }
+    return bytesToLatin1(arr).replace(/\u0000/g, '').trim();
+  }
+
+  // PDF 字面串 (...)：先按 PDF 转义规则还原成字节，再做编码猜测
+  function decodePdfLiteral(raw) {
+    const s = String(raw || '');
+    const bytes = [];
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c !== '\\') { bytes.push(s.charCodeAt(i) & 0xFF); continue; }
+      const n = s[i + 1];
+      if (n == null) break;
+      if (n >= '0' && n <= '7') {           // 八进制 \ddd（GBK 字节常这么写）
+        let oct = '', j = i + 1;
+        while (j < s.length && oct.length < 3 && s[j] >= '0' && s[j] <= '7') { oct += s[j]; j++; }
+        bytes.push(parseInt(oct, 8) & 0xFF);
+        i = j - 1;
+        continue;
+      }
+      const map = { n: 10, r: 13, t: 9, b: 8, f: 12, '(': 40, ')': 41, '\\': 92 };
+      if (map[n] != null) { bytes.push(map[n]); i++; continue; }
+      if (n === '\n') { i++; continue; }               // 续行
+      if (n === '\r') { i++; if (s[i + 1] === '\n') i++; continue; }
+      bytes.push(92);
+    }
+    return decodeBytesSmart(bytes);
+  }
+
   // PDF 元数据里的中文常写成 UTF-16BE 十六进制串（<FEFF...>），需要单独解码
   function decodePdfHex(hex) {
     const clean = String(hex || '').replace(/\s+/g, '');
     if (!clean || clean.length % 2) return '';
     const bytes = [];
     for (let i = 0; i < clean.length; i += 2) bytes.push(parseInt(clean.substr(i, 2), 16));
-    if (bytes[0] === 0xFE && bytes[1] === 0xFF) {
-      let out = '';
-      for (let i = 2; i + 1 < bytes.length; i += 2) out += String.fromCharCode((bytes[i] << 8) | bytes[i + 1]);
-      return out.trim();
-    }
-    if (typeof TextDecoder === 'function') {
-      try { return new TextDecoder('utf-8').decode(new Uint8Array(bytes)).replace(/\u0000/g, '').trim(); }
-      catch (e) { /* 退回逐字节解码 */ }
-    }
-    return bytesToLatin1(bytes).replace(/\u0000/g, '').trim();
+    return decodeBytesSmart(bytes);
   }
 
   function pdfField(src, key) {
@@ -550,7 +605,7 @@
     const m = src.match(re);
     if (!m) return '';
     if (m[2] != null) return decodePdfHex(m[2]);
-    return (m[1] || '').replace(/\\([()\\])/g, '$1').replace(/\\[nrt]/g, ' ').trim();
+    return decodePdfLiteral(m[1] || '');
   }
 
   // 知网下载的 PDF 文件名常是「题名_第一作者」，拆开可以让题名干净、并按作者搜到
@@ -563,6 +618,7 @@
   // 很多期刊 PDF 的 /Title 是排版工具留下的垃圾（Word 默认标题、期刊页眉、文件名本身），不能直接当题名
   function usablePdfTitle(value) {
     const s = String(value || '').trim();
+    if (looksGarbled(s)) return '';
     if (s.length < 6) return '';
     if (/^(microsoft|untitled|document\d*|doc\d*|word|wps|pdf|新建|无标题|未命名|论文模板|作业|扫描)/i.test(s)) return '';
     if (/\.(docx?|pdf|wps|caj)$/i.test(s)) return '';
@@ -572,10 +628,20 @@
 
   function hasCjk(value) { return /[\u4e00-\u9fa5]/.test(String(value || '')); }
 
+  // 解码失败时字面串会留下一堆 Latin-1 高位字符（´O´Ú 这种），这类值一律不算有效文本
+  function looksGarbled(value) {
+    const s = String(value || '');
+    if (!s) return false;
+    if (/\uFFFD/.test(s)) return true;
+    const bad = (s.match(/[\u0080-\u00FF\u0152\u0153\u0160\u0161\u0178\u0192\u02C6\u02DC\u2013\u2014\u201A\u201C\u201D\u2026\u2030\u2039\u203A\u20AC\u2122]/g) || []).length;
+    return bad >= Math.max(3, s.length * 0.3);
+  }
+
   // 题名像是排版残留 / 占位名时，界面要主动提示「这条可能读错了」
   function suspectTitle(value) {
     const s = String(value || '').trim();
     if (!s || s.length < 4) return true;
+    if (looksGarbled(s)) return true;
     if (/^未命名题录/.test(s)) return true;
     if (/^(microsoft|untitled|document\d*|新建|无标题|未命名|扫描件)/i.test(s)) return true;
     if (/\.(docx?|pdf|wps|caj)$/i.test(s)) return true;
@@ -686,6 +752,24 @@
   const UNKNOWN_ORG = ['', '未标注单位', '未标注机构', '未标注', '未知'];
   const UNKNOWN_VENUE = ['', '题录导入', '未知'];
 
+  // 英文姓名不区分大小写，也允许「Ma Chenlong / Chenlong Ma」「M. Chenlong」这类写法互换
+  function nameTokens(value) {
+    const s = String(value || '').normalize ? String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '') : String(value || '');
+    return s.toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim().split(/\s+/).filter(Boolean);
+  }
+  function authorMatch(p, query) {
+    const qt = nameTokens(query);
+    if (!qt.length) return true;
+    const authors = (p.authors || []).filter(Boolean);
+    if (!authors.length) return false;
+    const flat = authors.reduce((acc, a) => acc.concat(nameTokens(a)), []);
+    if (qt.every(t => flat.indexOf(t) >= 0)) return true;      // 顺序无关、逐词命中
+    const qn = normText(query);
+    return authors.some(a => { const an = normText(a); return an === qn || (qn.length >= 3 && an.indexOf(qn) >= 0); });
+  }
+
   // 逐条列出「为什么没通过筛选」，用于在界面上解释被挡住的导入题录
   function filterMissReasons(p, f) {
     const missing = p._missing || [];
@@ -709,8 +793,8 @@
     if (f.kind && !unknown('kind') && p.kind !== f.kind) reasons.push('文献类型：' + f.kind);
     if (f.oa && !unknown('oa') && !p.oa) reasons.push('仅看开放获取 OA');
     if (f.lang && (p.lang || 'zh') !== f.lang) reasons.push(f.lang === 'en' ? '仅英文文献' : '仅中文文献');
-    if (f.author && (p.authors || []).join(' ').indexOf(f.author) < 0) reasons.push('作者：' + f.author);
-    if (f.venue && !unknown('venue') && (p.venue || '').indexOf(f.venue) < 0) reasons.push('刊名：' + f.venue);
+    if (f.author && !authorMatch(p, f.author)) reasons.push('作者：' + f.author);
+    if (f.venue && !unknown('venue') && normText(p.venue).indexOf(normText(f.venue)) < 0) reasons.push('刊名：' + f.venue);
     return reasons;
   }
 
@@ -776,7 +860,8 @@
         let s = 0;
         if (raw.title.indexOf(k) >= 0) s += 6 * w;
         if (raw.kw.indexOf(k) >= 0) s += 4 * w;
-        if (raw.authors.indexOf(k) >= 0) s += 4 * w;   // 用作者名也能搜到刚导入的题录
+        // 作者按「词」匹配：不区分大小写、姓名顺序可颠倒、去掉音标重音，ma 不会误中 maria
+        if (nameTokens(k).length && authorMatch(p, k)) s += 4 * w;
         if (raw.abs.indexOf(k) >= 0) s += 2 * w;
         if (raw.field.indexOf(k) >= 0) s += 2 * w;
         if (raw.org.indexOf(k) >= 0) s += 3 * w;

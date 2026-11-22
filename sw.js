@@ -3,7 +3,7 @@
  * 跨域请求（如 OpenAlex）不拦截，直接走网络。
  * 发布新版本时请递增 CACHE 版本号。
  */
-const CACHE = 'paperlens-v3';
+const CACHE = 'paperlens-v4';
 const ASSETS = [
   './',
   './index.html',

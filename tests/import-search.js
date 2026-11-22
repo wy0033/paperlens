@@ -105,7 +105,41 @@ const F = extra => Object.assign({}, EMPTY, extra || {});
   const en = PL.parsePdf(enTitle, '基于视觉语言模型与模仿学习的机械臂自主操作算法_马晨龙.pdf', 'PDF 文件');
   check(en.items[0].title === '基于视觉语言模型与模仿学习的机械臂自主操作算法', '英文垃圾标题不覆盖中文文件名题名');
 
-  // ---- 10. 修正题录：改完题名立刻能被检索命中 ----
+  // ---- 10. PDF 字面串里的 GBK 字节（含八进制转义）必须按字节解码，不能读成乱码 ----
+  const gbkTitle = [0xBB, 0xF9, 0xD3, 0xDA, 0xC9, 0xEE, 0xB6, 0xC8, 0xD1, 0xA7, 0xCF, 0xB0, 0xB5, 0xC4, 0xBB, 0xFA, 0xD0, 0xB5, 0xB1, 0xDB, 0xD7, 0xA5, 0xC8, 0xA1, 0xCB, 0xE3, 0xB7, 0xA8];
+  const gbkAuthor = [0xC2, 0xED, 0xB3, 0xBF, 0xC1, 0xFA];
+  const literal = arr => arr.map(b => String.fromCharCode(b)).join('');
+  const gbkPdf = '%PDF-1.4\n/Title (' + literal(gbkTitle) + ')\n/Author (' + literal(gbkAuthor) + ')\n';
+  const gbkParsed = PL.parsePdf(new Uint8Array(Buffer.from(gbkPdf, 'binary')), 'paper.pdf', 'PDF 文件');
+  check(gbkParsed.items[0].title === '基于深度学习的机械臂抓取算法', 'GBK 字节标题解码为中文（不再出现 ´O´Ú 乱码）');
+  check(gbkParsed.items[0].authors[0] === '马晨龙', 'GBK 字节作者解码为中文');
+
+  const octalPdf = '%PDF-1.4\n/Title (' + gbkTitle.map(b => '\\' + b.toString(8).padStart(3, '0')).join('') + ')\n';
+  const octalParsed = PL.parsePdf(new Uint8Array(Buffer.from(octalPdf, 'binary')), 'paper.pdf', 'PDF 文件');
+  check(octalParsed.items[0].title === '基于深度学习的机械臂抓取算法', '八进制转义的 GBK 标题同样解码正确');
+
+  const leHex = 'FFFE' + Array.from('抓取算法研究').map(ch => [ch.charCodeAt(0) & 0xFF, (ch.charCodeAt(0) >> 8) & 0xFF].map(v => v.toString(16).padStart(2, '0')).join('')).join('');
+  const leParsed = PL.parsePdf(new Uint8Array(Buffer.from('%PDF-1.4\n/Title <' + leHex + '>\n', 'binary')), 'paper.pdf', 'PDF 文件');
+  check(leParsed.items[0].title === '抓取算法研究', 'UTF-16LE 十六进制标题也能解码');
+
+  const mojibake = PL.parsePdf(new Uint8Array(Buffer.from('%PDF-1.4\n/Title (' + literal([0x8F, 0xA1, 0x8F, 0xA2, 0x8F, 0xA3]) + ')\n', 'binary')), '机械臂抓取算法研究_张三.pdf', 'PDF 文件');
+  check(mojibake.items[0].title === '机械臂抓取算法研究', '无法解码的标题不写进题录，改用文件名');
+  check(PL.suspectTitle('´O´Ú²Î¿¼'), '乱码题名会被标记为可疑，提示用户修正');
+
+  // ---- 11. 英文姓名：大小写、姓名顺序、刊名大小写都不该影响筛选 ----
+  const enCsv = '题名,作者,文献来源\nVisual Servoing for Robotic Manipulation,Ma Chenlong,IEEE Robotics and Automation Letters';
+  const enItems = PL.parseBibliography(enCsv, 'IEEE').items;
+  PL.setImported(enItems);
+  const upper = await PL.search('', F({ author: 'MA CHENLONG' }), { source: 'demo' });
+  check(upper.items.some(x => x._imported), '作者筛选不区分大小写');
+  const reversed = await PL.search('', F({ author: 'Chenlong Ma' }), { source: 'demo' });
+  check(reversed.items.some(x => x._imported), '英文姓名颠倒顺序也能命中');
+  const venueCase = await PL.search('', F({ venue: 'ieee robotics' }), { source: 'demo' });
+  check(venueCase.items.some(x => x._imported), '刊名筛选不区分大小写');
+  const byEnName = await PL.search('chenlong ma', F(), { source: 'demo' });
+  check(byEnName.items.some(x => x._imported), '搜索框用英文名也能命中导入题录');
+
+  // ---- 12. 修正题录：改完题名立刻能被检索命中 ----
   const bad = PL.parsePdf(junkPdf, 'document1.pdf', 'PDF 文件').items;
   PL.setImported(bad);
   const before = await PL.search('机械臂自主操作', F(), { source: 'demo' });
@@ -118,7 +152,7 @@ const F = extra => Object.assign({}, EMPTY, extra || {});
   check(revised.id === PL.getImported()[0].id && revised._imported, '修正后保留原 id 与导入标记');
   check(revised._missing.indexOf('org') >= 0 && revised.org === '未标注单位', '修正后缺失单位仍按未知处理');
 
-  // ---- 11. 无导入题录时行为不变 ----
+  // ---- 13. 无导入题录时行为不变 ----
   PL.setImported([]);
   const none = await PL.search('联邦学习', F(), { source: 'demo' });
   check(none.items.length > 0 && !none.items.some(x => x._imported), '清空导入后仍可正常检索内置数据集');
